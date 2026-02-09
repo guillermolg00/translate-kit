@@ -1,6 +1,7 @@
 import { RootProvider } from "fumadocs-ui/provider/next";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { Analytics } from "@vercel/analytics/next";
 import "./global.css";
 
 export const metadata: Metadata = {
@@ -15,6 +16,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <Analytics />
       <body>
         <RootProvider>{children}</RootProvider>
       </body>
