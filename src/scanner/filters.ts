@@ -55,6 +55,25 @@ const IGNORE_PATTERNS = [
   /^[^a-zA-Z]*$/,       // No letters at all
 ];
 
+const CONTENT_PROPERTY_NAMES = [
+  "title",
+  "description",
+  "label",
+  "text",
+  "content",
+  "heading",
+  "subtitle",
+  "caption",
+  "summary",
+  "message",
+  "placeholder",
+  "alt",
+];
+
+export function isContentProperty(propName: string): boolean {
+  return CONTENT_PROPERTY_NAMES.includes(propName);
+}
+
 export function isTranslatableProp(
   propName: string,
   customProps?: string[],

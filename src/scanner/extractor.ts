@@ -1,6 +1,6 @@
 import _traverse from "@babel/traverse";
 import type { File } from "@babel/types";
-import { isTranslatableProp, isIgnoredTag, shouldIgnore } from "./filters.js";
+import { isTranslatableProp, isIgnoredTag, isContentProperty, shouldIgnore } from "./filters.js";
 import type { ExtractedString } from "../types.js";
 
 // Handle CJS/ESM interop
@@ -97,6 +97,34 @@ export function extractStrings(
       });
     },
 
+    ObjectProperty(path) {
+      // Only extract inside functions (components), not module-level objects like metadata
+      if (!isInsideFunction(path)) return;
+
+      // Detect strings in object properties like { title: "Project Management", description: "..." }
+      const keyNode = path.node.key;
+      if (keyNode.type !== "Identifier" && keyNode.type !== "StringLiteral") return;
+
+      const propName = keyNode.type === "Identifier" ? keyNode.name : keyNode.value;
+      if (!isContentProperty(propName)) return;
+
+      const valueNode = path.node.value;
+      if (valueNode.type !== "StringLiteral") return;
+
+      const text = valueNode.value.trim();
+      if (shouldIgnore(text)) return;
+
+      results.push({
+        text,
+        type: "object-property",
+        file: filePath,
+        line: valueNode.loc?.start.line ?? 0,
+        column: valueNode.loc?.start.column ?? 0,
+        componentName: getComponentName(path),
+        propName,
+      });
+    },
+
     CallExpression(path) {
       const callee = path.node.callee;
       if (callee.type !== "Identifier" || callee.name !== "t") return;
@@ -120,6 +148,21 @@ export function extractStrings(
   });
 
   return results;
+}
+
+function isInsideFunction(path: any): boolean {
+  let current = path.parentPath;
+  while (current) {
+    if (
+      current.isFunctionDeclaration() ||
+      current.isFunctionExpression() ||
+      current.isArrowFunctionExpression()
+    ) {
+      return true;
+    }
+    current = current.parentPath;
+  }
+  return false;
 }
 
 function getParentTagName(path: any): string | undefined {

@@ -87,10 +87,90 @@ describe("codegen transform", () => {
     );
   });
 
-  it("does not wrap text with mixed children", () => {
+  it("wraps text in mixed content and preserves whitespace", () => {
     const code = `function Greeting({ name }) { return <p>Hello {name}</p>; }`;
     const ast = parseFile(code, "test.tsx");
     const map = { Hello: "greeting.hello" };
+    const result = transform(ast, map);
+
+    expect(result.stringsWrapped).toBe(1);
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain('t("greeting.hello")');
+  });
+
+  it("wraps text after nested elements", () => {
+    const code = `function Def() { return <li><strong>Term</strong>: a definition here.</li>; }`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { ": a definition here.": "page.definition" };
+    const result = transform(ast, map);
+
+    expect(result.stringsWrapped).toBe(1);
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain('t("page.definition")');
+  });
+
+  it("wraps text before components in mixed content", () => {
+    const code = `function CTA() { return <Button>Meet Mimir <ArrowRight /></Button>; }`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Meet Mimir": "cta.meetMimir" };
+    const result = transform(ast, map);
+
+    expect(result.stringsWrapped).toBe(1);
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain('t("cta.meetMimir")');
+  });
+
+  it("wraps strings in object property values", () => {
+    const code = `function Features() {
+      const items = [
+        { icon: Star, title: "Project Management", description: "Manage your projects." },
+        { icon: Bolt, title: "Task Management", description: "Organize your tasks." },
+      ];
+      return <div>{items.map(i => <Card key={i.title} {...i} />)}</div>;
+    }`;
+    const ast = parseFile(code, "test.tsx");
+    const map = {
+      "Project Management": "features.projectManagement",
+      "Manage your projects.": "features.projectManagementDesc",
+      "Task Management": "features.taskManagement",
+      "Organize your tasks.": "features.taskManagementDesc",
+    };
+    const result = transform(ast, map);
+
+    expect(result.stringsWrapped).toBe(4);
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain('title: t("features.projectManagement")');
+    expect(result.code).toContain('description: t("features.projectManagementDesc")');
+    expect(result.code).toContain('title: t("features.taskManagement")');
+    expect(result.code).toContain('description: t("features.taskManagementDesc")');
+  });
+
+  it("does not wrap non-content object properties", () => {
+    const code = `function App() {
+      const config = { icon: "star", className: "text-red", href: "/about" };
+      return <div />;
+    }`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { star: "icon.star", "text-red": "class.red", "/about": "link.about" };
+    const result = transform(ast, map);
+
+    expect(result.stringsWrapped).toBe(0);
+    expect(result.modified).toBe(false);
+  });
+
+  it("does not wrap module-level object properties like metadata", () => {
+    const code = `
+      export const metadata = {
+        title: "My App",
+        description: "A great application for everyone.",
+      };
+      export default function Layout({ children }) { return <div>{children}</div>; }
+    `;
+    const ast = parseFile(code, "test.tsx");
+    const map = {
+      "My App": "meta.title",
+      "A great application for everyone.": "meta.description",
+    };
     const result = transform(ast, map);
 
     expect(result.stringsWrapped).toBe(0);

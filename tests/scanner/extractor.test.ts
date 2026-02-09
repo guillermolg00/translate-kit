@@ -107,4 +107,46 @@ describe("extractor", () => {
       expect(strings[0].text).toBe("Real text");
     });
   });
+
+  describe("object properties", () => {
+    it("extracts strings from content properties in objects", () => {
+      const code = `function Features() {
+        const items = [
+          { icon: Star, title: "Project Management", description: "Manage your projects." },
+        ];
+        return <div />;
+      }`;
+      const ast = parseFile(code, "test.tsx");
+      const strings = extractStrings(ast, "test.tsx");
+
+      const titles = strings.filter((s) => s.type === "object-property");
+      expect(titles).toHaveLength(2);
+      expect(titles.map((s) => s.text)).toContain("Project Management");
+      expect(titles.map((s) => s.text)).toContain("Manage your projects.");
+    });
+
+    it("does not extract non-content properties", () => {
+      const code = `function App() {
+        const config = { icon: "star", className: "red", href: "/about" };
+        return <div />;
+      }`;
+      const ast = parseFile(code, "test.tsx");
+      const strings = extractStrings(ast, "test.tsx");
+
+      const objProps = strings.filter((s) => s.type === "object-property");
+      expect(objProps).toHaveLength(0);
+    });
+
+    it("records propName for object properties", () => {
+      const code = `function App() {
+        const item = { title: "Hello World" };
+        return <div />;
+      }`;
+      const ast = parseFile(code, "test.tsx");
+      const strings = extractStrings(ast, "test.tsx");
+
+      const prop = strings.find((s) => s.type === "object-property");
+      expect(prop?.propName).toBe("title");
+    });
+  });
 });

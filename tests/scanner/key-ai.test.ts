@@ -51,30 +51,34 @@ const mockStrings: ExtractedString[] = [
   },
 ];
 
+function makeMockResponse(mappings: { index: number; key: string }[]) {
+  return {
+    object: { mappings },
+    finishReason: "stop",
+    usage: { promptTokens: 100, completionTokens: 50 },
+    rawResponse: undefined,
+    toJsonResponse: () => new Response(),
+    request: {} as any,
+    response: {} as any,
+    warnings: undefined,
+    providerMetadata: undefined,
+  } as any;
+}
+
 describe("generateSemanticKeys", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it("generates semantic keys for strings", async () => {
-    const mockResponse = {
-      "Sign in": "auth.signIn",
-      "Welcome to our platform": "hero.welcome",
-      Save: "common.save",
-      "Search...": "common.searchPlaceholder",
-    };
-
-    vi.mocked(generateObject).mockResolvedValueOnce({
-      object: mockResponse,
-      finishReason: "stop",
-      usage: { promptTokens: 100, completionTokens: 50 },
-      rawResponse: undefined,
-      toJsonResponse: () => new Response(),
-      request: {} as any,
-      response: {} as any,
-      warnings: undefined,
-      providerMetadata: undefined,
-    } as any);
+    vi.mocked(generateObject).mockResolvedValueOnce(
+      makeMockResponse([
+        { index: 0, key: "auth.signIn" },
+        { index: 1, key: "hero.welcome" },
+        { index: 2, key: "common.save" },
+        { index: 3, key: "common.searchPlaceholder" },
+      ]),
+    );
 
     const result = await generateSemanticKeys({
       model: mockModel,
@@ -92,23 +96,13 @@ describe("generateSemanticKeys", () => {
       "Sign in": "auth.signIn",
     };
 
-    const mockResponse = {
-      "Welcome to our platform": "hero.welcome",
-      Save: "common.save",
-      "Search...": "common.searchPlaceholder",
-    };
-
-    vi.mocked(generateObject).mockResolvedValueOnce({
-      object: mockResponse,
-      finishReason: "stop",
-      usage: { promptTokens: 100, completionTokens: 50 },
-      rawResponse: undefined,
-      toJsonResponse: () => new Response(),
-      request: {} as any,
-      response: {} as any,
-      warnings: undefined,
-      providerMetadata: undefined,
-    } as any);
+    vi.mocked(generateObject).mockResolvedValueOnce(
+      makeMockResponse([
+        { index: 0, key: "hero.welcome" },
+        { index: 1, key: "common.save" },
+        { index: 2, key: "common.searchPlaceholder" },
+      ]),
+    );
 
     const result = await generateSemanticKeys({
       model: mockModel,
@@ -144,21 +138,11 @@ describe("generateSemanticKeys", () => {
       "Sign in": "auth.signIn",
     };
 
-    const mockResponse = {
-      "Welcome to our platform": "auth.signIn",
-    };
-
-    vi.mocked(generateObject).mockResolvedValueOnce({
-      object: mockResponse,
-      finishReason: "stop",
-      usage: { promptTokens: 100, completionTokens: 50 },
-      rawResponse: undefined,
-      toJsonResponse: () => new Response(),
-      request: {} as any,
-      response: {} as any,
-      warnings: undefined,
-      providerMetadata: undefined,
-    } as any);
+    vi.mocked(generateObject).mockResolvedValueOnce(
+      makeMockResponse([
+        { index: 0, key: "auth.signIn" },
+      ]),
+    );
 
     const result = await generateSemanticKeys({
       model: mockModel,
@@ -184,24 +168,14 @@ describe("generateSemanticKeys", () => {
       },
     ];
 
-    const mockResponse = {
-      "Sign in": "auth.signIn",
-      "Welcome to our platform": "hero.welcome",
-      Save: "common.save",
-      "Search...": "common.searchPlaceholder",
-    };
-
-    vi.mocked(generateObject).mockResolvedValueOnce({
-      object: mockResponse,
-      finishReason: "stop",
-      usage: { promptTokens: 100, completionTokens: 50 },
-      rawResponse: undefined,
-      toJsonResponse: () => new Response(),
-      request: {} as any,
-      response: {} as any,
-      warnings: undefined,
-      providerMetadata: undefined,
-    } as any);
+    vi.mocked(generateObject).mockResolvedValueOnce(
+      makeMockResponse([
+        { index: 0, key: "auth.signIn" },
+        { index: 1, key: "hero.welcome" },
+        { index: 2, key: "common.save" },
+        { index: 3, key: "common.searchPlaceholder" },
+      ]),
+    );
 
     const result = await generateSemanticKeys({
       model: mockModel,

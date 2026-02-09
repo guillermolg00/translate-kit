@@ -31,8 +31,9 @@ function buildPrompt(strings: ExtractedString[]): string {
     "Strings:",
   ];
 
-  for (const str of strings) {
-    const parts: string[] = [`"${str.text}"`];
+  for (let i = 0; i < strings.length; i++) {
+    const str = strings[i];
+    const parts: string[] = [`[${i}] "${str.text}"`];
     if (str.componentName) parts.push(`component: ${str.componentName}`);
     if (str.parentTag) parts.push(`tag: ${str.parentTag}`);
     if (str.propName) parts.push(`prop: ${str.propName}`);
@@ -51,11 +52,14 @@ async function generateKeysBatchWithRetry(
   const prompt = buildPrompt(strings);
   const texts = strings.map((s) => s.text);
 
-  const shape: Record<string, z.ZodString> = {};
-  for (const text of texts) {
-    shape[text] = z.string().describe(`Semantic key for "${text}"`);
-  }
-  const schema = z.object(shape);
+  const schema = z.object({
+    mappings: z.array(
+      z.object({
+        index: z.number().describe("Zero-based index of the string"),
+        key: z.string().describe("Semantic i18n key"),
+      }),
+    ),
+  });
 
   let lastError: Error | undefined;
 
@@ -66,7 +70,14 @@ async function generateKeysBatchWithRetry(
         prompt,
         schema,
       });
-      return object;
+
+      const result: Record<string, string> = {};
+      for (const mapping of object.mappings) {
+        if (mapping.index >= 0 && mapping.index < texts.length) {
+          result[texts[mapping.index]] = mapping.key;
+        }
+      }
+      return result;
     } catch (error) {
       lastError = error as Error;
       if (attempt < retries) {

@@ -290,34 +290,11 @@ const codegenCommand = defineCommand({
 const initCommand = defineCommand({
   meta: {
     name: "init",
-    description: "Create a translate-kit config file",
+    description: "Interactive setup wizard for translate-kit",
   },
   async run() {
-    const template = `import { defineConfig } from "translate-kit";
-// import { openai } from "@ai-sdk/openai";
-
-export default defineConfig({
-  // Model: any Vercel AI SDK provider
-  // model: openai("gpt-4o-mini"),
-
-  sourceLocale: "en",
-  targetLocales: ["es"],
-  messagesDir: "./messages",
-
-  translation: {
-    batchSize: 50,
-    context: "Web application",
-  },
-
-  // Uncomment to enable scanner
-  // scan: {
-  //   include: ["src/**/*.tsx"],
-  //   exclude: ["**/*.test.*"],
-  // },
-});
-`;
-    await writeFile("translate-kit.config.ts", template, "utf-8");
-    console.log("Created translate-kit.config.ts");
+    const { runInitWizard } = await import("./init.js");
+    await runInitWizard();
   },
 });
 

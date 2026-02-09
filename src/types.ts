@@ -39,7 +39,7 @@ export interface LockFile {
 
 export interface ExtractedString {
   text: string;
-  type: "jsx-text" | "jsx-attribute" | "jsx-expression" | "t-call";
+  type: "jsx-text" | "jsx-attribute" | "jsx-expression" | "object-property" | "t-call";
   file: string;
   line: number;
   column: number;

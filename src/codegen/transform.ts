@@ -2,6 +2,7 @@ import _traverse from "@babel/traverse";
 import _generate from "@babel/generator";
 import * as t from "@babel/types";
 import type { File } from "@babel/types";
+import { isContentProperty } from "../scanner/filters.js";
 
 type TraverseFn = (ast: File, opts: Record<string, any>) => void;
 type GenerateFn = (ast: File, opts?: Record<string, any>) => { code: string };
@@ -79,23 +80,38 @@ export function transform(
       const text = path.node.value.trim();
       if (!text || !(text in textToKey)) return;
 
-      // Skip mixed content like <p>Hello {name}</p> — only wrap sole text children
       const parent = path.parentPath;
       if (!parent?.isJSXElement()) return;
-
-      const siblings = parent.node.children.filter((child) => {
-        if (child.type === "JSXText") return child.value.trim().length > 0;
-        return true;
-      });
-
-      if (siblings.length !== 1) return;
 
       const key = textToKey[text];
       const tCall = t.jsxExpressionContainer(
         t.callExpression(t.identifier("t"), [t.stringLiteral(key)]),
       );
 
-      path.replaceWith(tCall);
+      const siblings = parent.node.children.filter((child) => {
+        if (child.type === "JSXText") return child.value.trim().length > 0;
+        return true;
+      });
+
+      if (siblings.length === 1) {
+        // Sole child — simple replacement
+        path.replaceWith(tCall);
+      } else {
+        // Mixed content — preserve surrounding whitespace
+        const raw = path.node.value;
+        const hasLeading = raw !== raw.trimStart();
+        const hasTrailing = raw !== raw.trimEnd();
+        const nodes: t.Node[] = [];
+        if (hasLeading) {
+          nodes.push(t.jsxExpressionContainer(t.stringLiteral(" ")));
+        }
+        nodes.push(tCall);
+        if (hasTrailing) {
+          nodes.push(t.jsxExpressionContainer(t.stringLiteral(" ")));
+        }
+        path.replaceWithMultiple(nodes);
+      }
+
       stringsWrapped++;
 
       const compName = getComponentName(path);
@@ -133,6 +149,39 @@ export function transform(
       path.node.value = t.jsxExpressionContainer(
         t.callExpression(t.identifier("t"), [t.stringLiteral(key)]),
       );
+      stringsWrapped++;
+
+      const compName = getComponentName(path);
+      if (compName) componentsNeedingT.add(compName);
+    },
+
+    ObjectProperty(path) {
+      // Only transform inside functions (components), not module-level objects like metadata
+      if (!isInsideFunction(path)) return;
+
+      const keyNode = path.node.key;
+      if (keyNode.type !== "Identifier" && keyNode.type !== "StringLiteral") return;
+      const propName = keyNode.type === "Identifier" ? keyNode.name : keyNode.value;
+      if (!isContentProperty(propName)) return;
+
+      const valueNode = path.node.value;
+      if (valueNode.type !== "StringLiteral") return;
+
+      const text = valueNode.value;
+      if (!text || !(text in textToKey)) return;
+
+      // Skip if already a t() call
+      if (
+        valueNode.type === "CallExpression" &&
+        (valueNode as any).callee?.name === "t"
+      ) {
+        return;
+      }
+
+      const key = textToKey[text];
+      path.node.value = t.callExpression(t.identifier("t"), [
+        t.stringLiteral(key),
+      ]);
       stringsWrapped++;
 
       const compName = getComponentName(path);
@@ -199,6 +248,21 @@ export function transform(
 
   const output = generate(ast, { retainLines: false });
   return { code: output.code, stringsWrapped, modified: true };
+}
+
+function isInsideFunction(path: any): boolean {
+  let current = path.parentPath;
+  while (current) {
+    if (
+      current.isFunctionDeclaration() ||
+      current.isFunctionExpression() ||
+      current.isArrowFunctionExpression()
+    ) {
+      return true;
+    }
+    current = current.parentPath;
+  }
+  return false;
 }
 
 function injectTDeclaration(path: any): void {
