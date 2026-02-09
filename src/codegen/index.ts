@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { glob } from "tinyglobby";
 import { parseFile } from "../scanner/parser.js";
 import { transform, type TransformOptions } from "./transform.js";
+import { logVerbose } from "../logger.js";
 
 export interface CodegenOptions {
   include: string[];
@@ -39,8 +40,8 @@ export async function codegen(
     let ast;
     try {
       ast = parseFile(code, filePath);
-    } catch {
-      // Skip unparseable files
+    } catch (err) {
+      logVerbose(`Skipping unparseable file ${filePath}: ${err instanceof Error ? err.message : String(err)}`, true);
       continue;
     }
 

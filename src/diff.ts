@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { flatten } from "./flatten.js";
+import { logVerbose } from "./logger.js";
 import type { DiffResult, LockFile } from "./types.js";
 
 export function hashValue(value: string): string {
@@ -14,7 +15,11 @@ export async function loadJsonFile(
   try {
     const content = await readFile(filePath, "utf-8");
     return JSON.parse(content);
-  } catch {
+  } catch (err) {
+    logVerbose(
+      `Could not load ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+      true,
+    );
     return {};
   }
 }
@@ -24,7 +29,11 @@ export async function loadLockFile(messagesDir: string): Promise<LockFile> {
   try {
     const content = await readFile(lockPath, "utf-8");
     return JSON.parse(content);
-  } catch {
+  } catch (err) {
+    logVerbose(
+      `Could not load lock file: ${err instanceof Error ? err.message : String(err)}`,
+      true,
+    );
     return {};
   }
 }

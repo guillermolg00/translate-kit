@@ -33,8 +33,8 @@ const configSchema = z.object({
     .optional(),
 });
 
-export function defineConfig(config: TranslateKitConfig): TranslateKitConfig {
-  return config;
+export function defineConfig(config: TranslateKitConfig) {
+  return config as TranslateKitConfig;
 }
 
 export async function loadTranslateKitConfig(): Promise<TranslateKitConfig> {

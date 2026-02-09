@@ -508,7 +508,9 @@ export async function runInitWizard(): Promise<void> {
   if (existsSync(mapPath)) {
     try {
       existingMap = JSON.parse(await readFile(mapPath, "utf-8"));
-    } catch {}
+    } catch {
+      // Fresh start — no existing map file
+    }
   }
 
   const s2 = p.spinner();
@@ -524,11 +526,7 @@ export async function runInitWizard(): Promise<void> {
   s2.stop("Generating keys... done");
 
   // Step 3: Write map and source messages
-  await writeFile(
-    mapPath,
-    JSON.stringify(textToKey, null, 2) + "\n",
-    "utf-8",
-  );
+  await writeFile(mapPath, JSON.stringify(textToKey, null, 2) + "\n", "utf-8");
 
   const messages: Record<string, string> = {};
   for (const [text, key] of Object.entries(textToKey)) {
@@ -537,11 +535,7 @@ export async function runInitWizard(): Promise<void> {
 
   const sourceFile = join(resolvedMessagesDir, `${sourceLocale}.json`);
   const nested = unflatten(messages);
-  await writeFile(
-    sourceFile,
-    JSON.stringify(nested, null, 2) + "\n",
-    "utf-8",
-  );
+  await writeFile(sourceFile, JSON.stringify(nested, null, 2) + "\n", "utf-8");
 
   // Step 4: Codegen
   const s3 = p.spinner();

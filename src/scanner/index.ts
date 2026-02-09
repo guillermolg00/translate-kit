@@ -3,6 +3,7 @@ import { glob } from "tinyglobby";
 import { parseFile } from "./parser.js";
 import { extractStrings } from "./extractor.js";
 import { generateKey } from "./key-generator.js";
+import { logVerbose } from "../logger.js";
 import type { ExtractedString, ScanOptions } from "../types.js";
 
 export interface ScanResult {
@@ -31,8 +32,11 @@ export async function scan(
     let ast;
     try {
       ast = parseFile(code, filePath);
-    } catch {
-      // Skip unparseable files
+    } catch (err) {
+      logVerbose(
+        `Skipping unparseable file ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+        true,
+      );
       continue;
     }
 

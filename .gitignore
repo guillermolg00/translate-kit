@@ -1,3 +1,8 @@
 node_modules
 dist
 .translate-lock.json
+.env
+.env.local
+*.tsbuildinfo
+.DS_Store
+coverage/

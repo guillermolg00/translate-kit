@@ -2,20 +2,17 @@ import _traverse from "@babel/traverse";
 import _generate from "@babel/generator";
 import * as t from "@babel/types";
 import type { File } from "@babel/types";
+import type { NodePath } from "@babel/traverse";
 import { isContentProperty } from "../scanner/filters.js";
+import { resolveDefault, isInsideFunction, getComponentName } from "../utils/ast-helpers.js";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type TraverseFn = (ast: File, opts: Record<string, any>) => void;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type GenerateFn = (ast: File, opts?: Record<string, any>) => { code: string };
 
-const traverse: TraverseFn =
-  typeof _traverse === "function"
-    ? (_traverse as unknown as TraverseFn)
-    : (_traverse as unknown as { default: TraverseFn }).default;
-
-const generate: GenerateFn =
-  typeof _generate === "function"
-    ? (_generate as unknown as GenerateFn)
-    : (_generate as unknown as { default: GenerateFn }).default;
+const traverse = resolveDefault(_traverse) as unknown as TraverseFn;
+const generate = resolveDefault(_generate) as unknown as GenerateFn;
 
 export interface TransformResult {
   code: string;
@@ -170,14 +167,6 @@ export function transform(
       const text = valueNode.value;
       if (!text || !(text in textToKey)) return;
 
-      // Skip if already a t() call
-      if (
-        valueNode.type === "CallExpression" &&
-        (valueNode as any).callee?.name === "t"
-      ) {
-        return;
-      }
-
       const key = textToKey[text];
       path.node.value = t.callExpression(t.identifier("t"), [
         t.stringLiteral(key),
@@ -250,22 +239,7 @@ export function transform(
   return { code: output.code, stringsWrapped, modified: true };
 }
 
-function isInsideFunction(path: any): boolean {
-  let current = path.parentPath;
-  while (current) {
-    if (
-      current.isFunctionDeclaration() ||
-      current.isFunctionExpression() ||
-      current.isArrowFunctionExpression()
-    ) {
-      return true;
-    }
-    current = current.parentPath;
-  }
-  return false;
-}
-
-function injectTDeclaration(path: any): void {
+function injectTDeclaration(path: NodePath<t.FunctionDeclaration>): void {
   const body = path.node.body;
   if (body.type !== "BlockStatement") return;
   injectTIntoBlock(body);
@@ -298,25 +272,3 @@ function injectTIntoBlock(block: t.BlockStatement): void {
   block.body.unshift(tDecl);
 }
 
-function getComponentName(path: any): string | undefined {
-  let current = path;
-  while (current) {
-    if (current.isFunctionDeclaration?.() && current.node.id) {
-      return current.node.id.name;
-    }
-    if (
-      current.isVariableDeclarator?.() &&
-      current.node.id?.type === "Identifier"
-    ) {
-      return current.node.id.name;
-    }
-    if (current.isExportDefaultDeclaration?.()) {
-      const decl = current.node.declaration;
-      if (decl.type === "FunctionDeclaration" && decl.id) {
-        return decl.id.name;
-      }
-    }
-    current = current.parentPath;
-  }
-  return undefined;
-}

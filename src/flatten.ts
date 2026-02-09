@@ -22,7 +22,9 @@ export function flatten(
   return result;
 }
 
-export function unflatten(obj: Record<string, string>): Record<string, unknown> {
+export function unflatten(
+  obj: Record<string, string>,
+): Record<string, unknown> {
   const result: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(obj)) {
@@ -31,7 +33,12 @@ export function unflatten(obj: Record<string, string>): Record<string, unknown> 
 
     for (let i = 0; i < parts.length - 1; i++) {
       const part = parts[i];
-      if (!(part in current) || typeof current[part] !== "object") {
+      if (part in current && typeof current[part] !== "object") {
+        console.warn(
+          `[translate-kit] Key conflict: "${parts.slice(0, i + 1).join(".")}" is a value but "${key}" expects it to be an object`,
+        );
+        current[part] = {};
+      } else if (!(part in current)) {
         current[part] = {};
       }
       current = current[part] as Record<string, unknown>;

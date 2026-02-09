@@ -68,6 +68,14 @@ export function logWarning(message: string): void {
   console.log(`${pc.yellow("⚠")} ${message}`);
 }
 
+export function logInfo(message: string): void {
+  console.log(`  ${message}`);
+}
+
+export function logSuccess(message: string): void {
+  console.log(`${pc.green("✔")} ${message}`);
+}
+
 export function logVerbose(message: string, verbose: boolean): void {
   if (verbose) {
     console.log(pc.dim(`  ${message}`));

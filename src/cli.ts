@@ -17,12 +17,17 @@ import {
   logDryRun,
   logScanResult,
   logError,
+  logInfo,
+  logSuccess,
   logVerbose,
+  logWarning,
 } from "./logger.js";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import type { TranslationResult } from "./types.js";
 
-async function loadMapFile(messagesDir: string): Promise<Record<string, string>> {
+async function loadMapFile(
+  messagesDir: string,
+): Promise<Record<string, string>> {
   const mapPath = join(messagesDir, ".translate-map.json");
   try {
     const content = await readFile(mapPath, "utf-8");
@@ -74,9 +79,13 @@ const translateCommand = defineCommand({
     const opts = config.translation ?? {};
     const verbose = args.verbose;
 
-    const locales = args.locale
-      ? [args.locale]
-      : targetLocales;
+    const locales = args.locale ? [args.locale] : targetLocales;
+
+    if (args.locale && !targetLocales.includes(args.locale)) {
+      logWarning(
+        `Locale "${args.locale}" is not in targetLocales [${targetLocales.join(", ")}]`,
+      );
+    }
 
     const sourceFile = join(messagesDir, `${sourceLocale}.json`);
     const sourceRaw = await loadJsonFile(sourceFile);
@@ -140,7 +149,9 @@ const translateCommand = defineCommand({
           });
         } catch (err) {
           errors = Object.keys(toTranslate).length;
-          logError(`Translation failed for ${locale}: ${(err as Error).message}`);
+          logError(
+            `Translation failed for ${locale}: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
 
@@ -155,7 +166,12 @@ const translateCommand = defineCommand({
       // Update lock file with all source keys that now have translations
       const allTranslatedKeys = Object.keys(finalFlat);
       const currentLock = await loadLockFile(messagesDir);
-      await writeLockFile(messagesDir, sourceFlat, currentLock, allTranslatedKeys);
+      await writeLockFile(
+        messagesDir,
+        sourceFlat,
+        currentLock,
+        allTranslatedKeys,
+      );
 
       const result: TranslationResult = {
         locale,
@@ -192,7 +208,9 @@ const scanCommand = defineCommand({
     const config = await loadTranslateKitConfig();
 
     if (!config.scan) {
-      logError("No scan configuration found. Add a 'scan' section to your config.");
+      logError(
+        "No scan configuration found. Add a 'scan' section to your config.",
+      );
       process.exit(1);
     }
 
@@ -204,14 +222,16 @@ const scanCommand = defineCommand({
 
     if (args["dry-run"]) {
       for (const str of bareStrings) {
-        console.log(`  "${str.text}" (${str.componentName ?? "unknown"}, ${str.file})`);
+        logInfo(
+          `"${str.text}" (${str.componentName ?? "unknown"}, ${str.file})`,
+        );
       }
       return;
     }
 
     const existingMap = await loadMapFile(config.messagesDir);
 
-    console.log("  Generating semantic keys...");
+    logInfo("Generating semantic keys...");
     const textToKey = await generateSemanticKeys({
       model: config.model,
       strings: bareStrings,
@@ -222,7 +242,9 @@ const scanCommand = defineCommand({
     });
 
     await writeMapFile(config.messagesDir, textToKey);
-    console.log(`  Written .translate-map.json (${Object.keys(textToKey).length} keys)`);
+    logSuccess(
+      `Written .translate-map.json (${Object.keys(textToKey).length} keys)`,
+    );
 
     const messages: Record<string, string> = {};
     for (const [text, key] of Object.entries(textToKey)) {
@@ -235,7 +257,7 @@ const scanCommand = defineCommand({
     const content = JSON.stringify(nested, null, 2) + "\n";
     await writeFile(sourceFile, content, "utf-8");
 
-    console.log(`  Written to ${sourceFile}`);
+    logSuccess(`Written to ${sourceFile}`);
   },
 });
 
@@ -255,7 +277,9 @@ const codegenCommand = defineCommand({
     const config = await loadTranslateKitConfig();
 
     if (!config.scan) {
-      logError("No scan configuration found. Add a 'scan' section to your config.");
+      logError(
+        "No scan configuration found. Add a 'scan' section to your config.",
+      );
       process.exit(1);
     }
 
@@ -267,9 +291,11 @@ const codegenCommand = defineCommand({
     }
 
     if (args["dry-run"]) {
-      console.log(`\n  Would replace ${Object.keys(textToKey).length} strings with t() calls\n`);
+      logInfo(
+        `\n  Would replace ${Object.keys(textToKey).length} strings with t() calls\n`,
+      );
       for (const [text, key] of Object.entries(textToKey)) {
-        console.log(`  "${text}" → t("${key}")`);
+        logInfo(`"${text}" → t("${key}")`);
       }
       return;
     }
@@ -281,8 +307,8 @@ const codegenCommand = defineCommand({
       i18nImport: config.scan.i18nImport,
     });
 
-    console.log(
-      `\n  Codegen complete: ${result.stringsWrapped} strings wrapped in ${result.filesModified} files (${result.filesProcessed} files processed)\n`,
+    logSuccess(
+      `Codegen complete: ${result.stringsWrapped} strings wrapped in ${result.filesModified} files (${result.filesProcessed} files processed)`,
     );
   },
 });
@@ -313,7 +339,11 @@ const main = defineCommand({
   // Default to translate command
   async run({ args, rawArgs }) {
     if (rawArgs.length === 0 || rawArgs[0]?.startsWith("-")) {
-      await translateCommand.run!({ args: args as any, rawArgs, cmd: translateCommand });
+      await translateCommand.run!({
+        args: args as any,
+        rawArgs,
+        cmd: translateCommand,
+      });
     }
   },
 });

@@ -1,13 +1,20 @@
 import _traverse from "@babel/traverse";
 import type { File } from "@babel/types";
-import { isTranslatableProp, isIgnoredTag, isContentProperty, shouldIgnore } from "./filters.js";
+import {
+  isTranslatableProp,
+  isIgnoredTag,
+  isContentProperty,
+  shouldIgnore,
+} from "./filters.js";
+import {
+  resolveDefault,
+  isInsideFunction,
+  getComponentName,
+  getParentTagName,
+} from "../utils/ast-helpers.js";
 import type { ExtractedString } from "../types.js";
 
-// Handle CJS/ESM interop
-const traverse =
-  typeof _traverse === "function"
-    ? _traverse
-    : (_traverse as unknown as { default: typeof _traverse }).default;
+const traverse = resolveDefault(_traverse) as unknown as typeof _traverse;
 
 export function extractStrings(
   ast: File,
@@ -103,9 +110,11 @@ export function extractStrings(
 
       // Detect strings in object properties like { title: "Project Management", description: "..." }
       const keyNode = path.node.key;
-      if (keyNode.type !== "Identifier" && keyNode.type !== "StringLiteral") return;
+      if (keyNode.type !== "Identifier" && keyNode.type !== "StringLiteral")
+        return;
 
-      const propName = keyNode.type === "Identifier" ? keyNode.name : keyNode.value;
+      const propName =
+        keyNode.type === "Identifier" ? keyNode.name : keyNode.value;
       if (!isContentProperty(propName)) return;
 
       const valueNode = path.node.value;
@@ -148,56 +157,4 @@ export function extractStrings(
   });
 
   return results;
-}
-
-function isInsideFunction(path: any): boolean {
-  let current = path.parentPath;
-  while (current) {
-    if (
-      current.isFunctionDeclaration() ||
-      current.isFunctionExpression() ||
-      current.isArrowFunctionExpression()
-    ) {
-      return true;
-    }
-    current = current.parentPath;
-  }
-  return false;
-}
-
-function getParentTagName(path: any): string | undefined {
-  let current = path.parentPath;
-  while (current) {
-    if (current.isJSXElement()) {
-      const opening = current.node.openingElement;
-      if (opening.name.type === "JSXIdentifier") {
-        return opening.name.name;
-      }
-      if (opening.name.type === "JSXMemberExpression") {
-        return `${opening.name.object.name}.${opening.name.property.name}`;
-      }
-    }
-    current = current.parentPath;
-  }
-  return undefined;
-}
-
-function getComponentName(path: any): string | undefined {
-  let current = path;
-  while (current) {
-    if (current.isFunctionDeclaration() && current.node.id) {
-      return current.node.id.name;
-    }
-    if (current.isVariableDeclarator() && current.node.id?.type === "Identifier") {
-      return current.node.id.name;
-    }
-    if (current.isExportDefaultDeclaration()) {
-      const decl = current.node.declaration;
-      if (decl.type === "FunctionDeclaration" && decl.id) {
-        return decl.id.name;
-      }
-    }
-    current = current.parentPath;
-  }
-  return undefined;
 }

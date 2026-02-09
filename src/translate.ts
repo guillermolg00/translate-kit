@@ -102,8 +102,14 @@ export interface TranslateAllInput {
 export async function translateAll(
   input: TranslateAllInput,
 ): Promise<Record<string, string>> {
-  const { model, entries, sourceLocale, targetLocale, options, onBatchComplete } =
-    input;
+  const {
+    model,
+    entries,
+    sourceLocale,
+    targetLocale,
+    options,
+    onBatchComplete,
+  } = input;
 
   const keys = Object.keys(entries);
   if (keys.length === 0) return {};

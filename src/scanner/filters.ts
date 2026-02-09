@@ -47,12 +47,12 @@ const IGNORE_TAGS = [
 ];
 
 const IGNORE_PATTERNS = [
-  /^\s*$/,              // Whitespace only
-  /^https?:\/\//,       // URLs
+  /^\s*$/, // Whitespace only
+  /^https?:\/\//, // URLs
   /^[a-z]+(-[a-z]+)+$/, // kebab-case identifiers
-  /^[A-Z_]+$/,          // CONSTANT_CASE
-  /^[\d.,%$€£¥]+$/,    // Numbers, currency
-  /^[^a-zA-Z]*$/,       // No letters at all
+  /^[A-Z_]+$/, // CONSTANT_CASE
+  /^[\d.,%$€£¥]+$/, // Numbers, currency
+  /^[^a-zA-Z]*$/, // No letters at all
 ];
 
 const CONTENT_PROPERTY_NAMES = [
