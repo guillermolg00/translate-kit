@@ -1,0 +1,258 @@
+import _traverse from "@babel/traverse";
+import _generate from "@babel/generator";
+import * as t from "@babel/types";
+import type { File } from "@babel/types";
+
+type TraverseFn = (ast: File, opts: Record<string, any>) => void;
+type GenerateFn = (ast: File, opts?: Record<string, any>) => { code: string };
+
+const traverse: TraverseFn =
+  typeof _traverse === "function"
+    ? (_traverse as unknown as TraverseFn)
+    : (_traverse as unknown as { default: TraverseFn }).default;
+
+const generate: GenerateFn =
+  typeof _generate === "function"
+    ? (_generate as unknown as GenerateFn)
+    : (_generate as unknown as { default: GenerateFn }).default;
+
+export interface TransformResult {
+  code: string;
+  stringsWrapped: number;
+  modified: boolean;
+}
+
+export interface TransformOptions {
+  i18nImport?: string;
+}
+
+function hasUseTranslationsImport(ast: File, importSource: string): boolean {
+  for (const node of ast.program.body) {
+    if (
+      node.type === "ImportDeclaration" &&
+      node.source.value === importSource
+    ) {
+      for (const spec of node.specifiers) {
+        if (
+          spec.type === "ImportSpecifier" &&
+          spec.imported.type === "Identifier" &&
+          spec.imported.name === "useTranslations"
+        ) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+function hasUseTranslationsCall(ast: File): boolean {
+  let found = false;
+  traverse(ast, {
+    VariableDeclarator(path) {
+      const init = path.node.init;
+      if (
+        init?.type === "CallExpression" &&
+        init.callee.type === "Identifier" &&
+        init.callee.name === "useTranslations"
+      ) {
+        found = true;
+        path.stop();
+      }
+    },
+    noScope: true,
+  });
+  return found;
+}
+
+export function transform(
+  ast: File,
+  textToKey: Record<string, string>,
+  options: TransformOptions = {},
+): TransformResult {
+  const importSource = options.i18nImport ?? "next-intl";
+  let stringsWrapped = 0;
+  const componentsNeedingT = new Set<string>();
+
+  traverse(ast, {
+    JSXText(path) {
+      const text = path.node.value.trim();
+      if (!text || !(text in textToKey)) return;
+
+      // Skip mixed content like <p>Hello {name}</p> — only wrap sole text children
+      const parent = path.parentPath;
+      if (!parent?.isJSXElement()) return;
+
+      const siblings = parent.node.children.filter((child) => {
+        if (child.type === "JSXText") return child.value.trim().length > 0;
+        return true;
+      });
+
+      if (siblings.length !== 1) return;
+
+      const key = textToKey[text];
+      const tCall = t.jsxExpressionContainer(
+        t.callExpression(t.identifier("t"), [t.stringLiteral(key)]),
+      );
+
+      path.replaceWith(tCall);
+      stringsWrapped++;
+
+      const compName = getComponentName(path);
+      if (compName) componentsNeedingT.add(compName);
+    },
+
+    JSXAttribute(path) {
+      const value = path.node.value;
+      if (!value) return;
+
+      let text: string | undefined;
+
+      if (value.type === "StringLiteral") {
+        text = value.value;
+      } else if (
+        value.type === "JSXExpressionContainer" &&
+        value.expression.type === "StringLiteral"
+      ) {
+        text = value.expression.value;
+      }
+
+      if (!text || !(text in textToKey)) return;
+
+      // Skip already wrapped t() calls
+      if (
+        value.type === "JSXExpressionContainer" &&
+        value.expression.type === "CallExpression" &&
+        value.expression.callee.type === "Identifier" &&
+        value.expression.callee.name === "t"
+      ) {
+        return;
+      }
+
+      const key = textToKey[text];
+      path.node.value = t.jsxExpressionContainer(
+        t.callExpression(t.identifier("t"), [t.stringLiteral(key)]),
+      );
+      stringsWrapped++;
+
+      const compName = getComponentName(path);
+      if (compName) componentsNeedingT.add(compName);
+    },
+  });
+
+  if (stringsWrapped === 0) {
+    return { code: generate(ast).code, stringsWrapped: 0, modified: false };
+  }
+
+  if (!hasUseTranslationsImport(ast, importSource)) {
+    const importDecl = t.importDeclaration(
+      [
+        t.importSpecifier(
+          t.identifier("useTranslations"),
+          t.identifier("useTranslations"),
+        ),
+      ],
+      t.stringLiteral(importSource),
+    );
+
+    let lastImportIndex = -1;
+    for (let i = 0; i < ast.program.body.length; i++) {
+      if (ast.program.body[i].type === "ImportDeclaration") {
+        lastImportIndex = i;
+      }
+    }
+
+    if (lastImportIndex >= 0) {
+      ast.program.body.splice(lastImportIndex + 1, 0, importDecl);
+    } else {
+      ast.program.body.unshift(importDecl);
+    }
+  }
+
+  if (!hasUseTranslationsCall(ast)) {
+    traverse(ast, {
+      FunctionDeclaration(path) {
+        const name = path.node.id?.name;
+        if (!name || !componentsNeedingT.has(name)) return;
+        injectTDeclaration(path);
+      },
+      VariableDeclarator(path) {
+        if (path.node.id.type !== "Identifier") return;
+        const name = path.node.id.name;
+        if (!componentsNeedingT.has(name)) return;
+
+        const init = path.node.init;
+        if (!init) return;
+
+        if (
+          init.type === "ArrowFunctionExpression" ||
+          init.type === "FunctionExpression"
+        ) {
+          if (init.body.type === "BlockStatement") {
+            injectTIntoBlock(init.body);
+          }
+        }
+      },
+      noScope: true,
+    });
+  }
+
+  const output = generate(ast, { retainLines: false });
+  return { code: output.code, stringsWrapped, modified: true };
+}
+
+function injectTDeclaration(path: any): void {
+  const body = path.node.body;
+  if (body.type !== "BlockStatement") return;
+  injectTIntoBlock(body);
+}
+
+function injectTIntoBlock(block: t.BlockStatement): void {
+  for (const stmt of block.body) {
+    if (
+      stmt.type === "VariableDeclaration" &&
+      stmt.declarations.some(
+        (d) =>
+          d.id.type === "Identifier" &&
+          d.id.name === "t" &&
+          d.init?.type === "CallExpression" &&
+          d.init.callee.type === "Identifier" &&
+          d.init.callee.name === "useTranslations",
+      )
+    ) {
+      return;
+    }
+  }
+
+  const tDecl = t.variableDeclaration("const", [
+    t.variableDeclarator(
+      t.identifier("t"),
+      t.callExpression(t.identifier("useTranslations"), []),
+    ),
+  ]);
+
+  block.body.unshift(tDecl);
+}
+
+function getComponentName(path: any): string | undefined {
+  let current = path;
+  while (current) {
+    if (current.isFunctionDeclaration?.() && current.node.id) {
+      return current.node.id.name;
+    }
+    if (
+      current.isVariableDeclarator?.() &&
+      current.node.id?.type === "Identifier"
+    ) {
+      return current.node.id.name;
+    }
+    if (current.isExportDefaultDeclaration?.()) {
+      const decl = current.node.declaration;
+      if (decl.type === "FunctionDeclaration" && decl.id) {
+        return decl.id.name;
+      }
+    }
+    current = current.parentPath;
+  }
+  return undefined;
+}

@@ -1,0 +1,30 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "loading": "Loading..."
+  },
+  "auth": {
+    "login": "Log in",
+    "logout": "Log out",
+    "signup": "Sign up",
+    "forgotPassword": "Forgot your password?",
+    "resetPassword": "Reset password"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "welcome": "Welcome back, {name}!",
+    "stats": {
+      "users": "Total users",
+      "revenue": "Monthly revenue",
+      "growth": "Growth rate"
+    }
+  },
+  "errors": {
+    "notFound": "Page not found",
+    "serverError": "Something went wrong. Please try again.",
+    "unauthorized": "You don't have permission to access this page."
+  }
+}

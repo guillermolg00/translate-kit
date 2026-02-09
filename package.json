@@ -1,0 +1,51 @@
+{
+  "name": "translate-kit",
+  "version": "0.1.0",
+  "description": "AI-powered translation SDK for build time. Compatible with next-intl.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "translate-kit": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "bun run build"
+  },
+  "dependencies": {
+    "@babel/generator": "^7.24.0",
+    "@babel/parser": "^7.24.0",
+    "@babel/traverse": "^7.24.0",
+    "@babel/types": "^7.24.0",
+    "c12": "^2.0.0",
+    "citty": "^0.1.6",
+    "dotenv": "^17.2.4",
+    "p-limit": "^6.1.0",
+    "picocolors": "^1.1.0",
+    "tinyglobby": "^0.2.15",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/babel__generator": "^7.6.0",
+    "@types/babel__traverse": "^7.20.0",
+    "@types/node": "^22.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  },
+  "peerDependencies": {
+    "ai": ">=4.0.0"
+  }
+}
