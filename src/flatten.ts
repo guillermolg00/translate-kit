@@ -16,7 +16,6 @@ export function flatten(
     ) {
       Object.assign(result, flatten(value as Record<string, unknown>, fullKey));
     }
-    // Skip arrays and non-string primitives (preserve them separately)
   }
 
   return result;

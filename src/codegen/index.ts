@@ -9,6 +9,8 @@ export interface CodegenOptions {
   exclude?: string[];
   textToKey: Record<string, string>;
   i18nImport?: string;
+  mode?: "keys" | "inline";
+  componentPath?: string;
 }
 
 export interface CodegenResult {
@@ -32,6 +34,8 @@ export async function codegen(
 
   const transformOpts: TransformOptions = {
     i18nImport: options.i18nImport,
+    mode: options.mode,
+    componentPath: options.componentPath,
   };
 
   for (const filePath of files) {

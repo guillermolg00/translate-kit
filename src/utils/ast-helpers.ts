@@ -41,7 +41,16 @@ export function getComponentName(path: NodePath<Node>): string | undefined {
       current.isVariableDeclarator() &&
       current.node.id?.type === "Identifier"
     ) {
-      return current.node.id.name;
+      // Only treat as component name if the init is a function (arrow/expression).
+      // Skip plain variables like `const items = [...]`.
+      const init = current.node.init;
+      if (
+        init &&
+        (init.type === "ArrowFunctionExpression" ||
+          init.type === "FunctionExpression")
+      ) {
+        return current.node.id.name;
+      }
     }
     if (current.isExportDefaultDeclaration()) {
       const decl = current.node.declaration;
@@ -65,8 +74,8 @@ export function getParentTagName(path: NodePath<Node>): string | undefined {
       if (opening.name.type === "JSXIdentifier") {
         return opening.name.name;
       }
-      if (opening.name.type === "JSXMemberExpression") {
-        return `${(opening.name.object as { name: string }).name}.${opening.name.property.name}`;
+      if (opening.name.type === "JSXMemberExpression" && opening.name.object.type === "JSXIdentifier") {
+        return `${opening.name.object.name}.${opening.name.property.name}`;
       }
     }
     current = current.parentPath;

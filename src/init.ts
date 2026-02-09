@@ -10,6 +10,7 @@ import { translateAll } from "./translate.js";
 import { writeTranslation, writeLockFile } from "./writer.js";
 import { loadLockFile } from "./diff.js";
 import { unflatten } from "./flatten.js";
+import { CLIENT_TEMPLATE, SERVER_TEMPLATE, generateI18nHelper } from "./templates/t-component.js";
 
 const AI_PROVIDERS = {
   openai: {
@@ -112,6 +113,8 @@ function generateConfigFile(opts: {
   i18nImport: string;
   context: string;
   tone: string;
+  mode: "keys" | "inline";
+  componentPath?: string;
 }): string {
   const provider = AI_PROVIDERS[opts.providerKey];
   const lines: string[] = [];
@@ -120,6 +123,9 @@ function generateConfigFile(opts: {
   lines.push(``);
   lines.push(`export default {`);
   lines.push(`  model: ${provider.fn}("${opts.modelName}"),`);
+  if (opts.mode === "inline") {
+    lines.push(`  mode: "inline",`);
+  }
   lines.push(`  sourceLocale: "${opts.sourceLocale}",`);
   lines.push(
     `  targetLocales: [${opts.targetLocales.map((l) => `"${l}"`).join(", ")}],`,
@@ -143,10 +149,16 @@ function generateConfigFile(opts: {
     `    include: [${opts.includePatterns.map((p) => `"${p}"`).join(", ")}],`,
   );
   lines.push(`    exclude: ["**/*.test.*", "**/*.spec.*"],`);
-  if (opts.i18nImport) {
+  if (opts.mode === "keys" && opts.i18nImport) {
     lines.push(`    i18nImport: "${opts.i18nImport}",`);
   }
   lines.push(`  },`);
+
+  if (opts.mode === "inline" && opts.componentPath) {
+    lines.push(`  inline: {`);
+    lines.push(`    componentPath: "${opts.componentPath}",`);
+    lines.push(`  },`);
+  }
 
   lines.push(`};`);
   lines.push(``);
@@ -154,10 +166,59 @@ function generateConfigFile(opts: {
   return lines.join("\n");
 }
 
-// --- next-intl setup ---
-
 function detectSrcDir(cwd: string): boolean {
   return existsSync(join(cwd, "src", "app"));
+}
+
+function resolveComponentPath(cwd: string, componentPath: string): string {
+  if (componentPath.startsWith("@/")) {
+    const rel = componentPath.slice(2);
+    const useSrc = existsSync(join(cwd, "src"));
+    return join(cwd, useSrc ? "src" : "", rel);
+  }
+  if (componentPath.startsWith("~/")) {
+    return join(cwd, componentPath.slice(2));
+  }
+  return join(cwd, componentPath);
+}
+
+function findLayoutFile(base: string): string | undefined {
+  for (const ext of ["tsx", "jsx", "ts", "js"]) {
+    const candidate = join(base, "app", `layout.${ext}`);
+    if (existsSync(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+async function createEmptyMessageFiles(
+  msgDir: string,
+  locales: string[],
+): Promise<void> {
+  await mkdir(msgDir, { recursive: true });
+  for (const locale of locales) {
+    const msgFile = join(msgDir, `${locale}.json`);
+    if (!existsSync(msgFile)) {
+      await writeFile(msgFile, "{}\n", "utf-8");
+    }
+  }
+}
+
+function insertImportsAfterLast(content: string, importLines: string): string {
+  const lastImportIdx = content.lastIndexOf("import ");
+  const endOfLastImport = content.indexOf("\n", lastImportIdx);
+  return (
+    content.slice(0, endOfLastImport + 1) +
+    importLines +
+    content.slice(endOfLastImport + 1)
+  );
+}
+
+function ensureAsyncLayout(content: string): string {
+  if (content.match(/async\s+function\s+\w*Layout/)) return content;
+  return content.replace(
+    /export\s+default\s+function\s+(\w*Layout)/,
+    "export default async function $1",
+  );
 }
 
 async function setupNextIntl(
@@ -171,7 +232,6 @@ async function setupNextIntl(
   const allLocales = [sourceLocale, ...targetLocales];
   const filesCreated: string[] = [];
 
-  // 1. Create i18n/request.ts
   const i18nDir = join(base, "i18n");
   await mkdir(i18nDir, { recursive: true });
 
@@ -219,7 +279,6 @@ export default getRequestConfig(async () => {
     filesCreated.push(relative(cwd, requestFile));
   }
 
-  // 2. Wrap next.config.ts with createNextIntlPlugin
   const nextConfigPath = join(cwd, "next.config.ts");
   if (existsSync(nextConfigPath)) {
     const content = await readFile(nextConfigPath, "utf-8");
@@ -227,9 +286,8 @@ export default getRequestConfig(async () => {
       const importLine = `import createNextIntlPlugin from "next-intl/plugin";\n`;
       const pluginLine = `const withNextIntl = createNextIntlPlugin();\n`;
 
-      // Replace `export default <expr>;` → `export default withNextIntl(<expr>);`
       const wrapped = content.replace(
-        /export default (.+);/,
+        /export default (.+?);/,
         "export default withNextIntl($1);",
       );
 
@@ -239,16 +297,7 @@ export default getRequestConfig(async () => {
     }
   }
 
-  // 3. Add NextIntlClientProvider to root layout
-  const layoutExts = ["tsx", "jsx", "ts", "js"];
-  let layoutPath: string | undefined;
-  for (const ext of layoutExts) {
-    const candidate = join(base, "app", `layout.${ext}`);
-    if (existsSync(candidate)) {
-      layoutPath = candidate;
-      break;
-    }
-  }
+  const layoutPath = findLayoutFile(base);
 
   if (layoutPath) {
     let layoutContent = await readFile(layoutPath, "utf-8");
@@ -257,27 +306,14 @@ export default getRequestConfig(async () => {
         'import { NextIntlClientProvider } from "next-intl";\n' +
         'import { getMessages } from "next-intl/server";\n';
 
-      const lastImportIdx = layoutContent.lastIndexOf("import ");
-      const endOfLastImport = layoutContent.indexOf("\n", lastImportIdx);
-      layoutContent =
-        layoutContent.slice(0, endOfLastImport + 1) +
-        importLines +
-        layoutContent.slice(endOfLastImport + 1);
-
-      // Ensure the layout function is async
-      if (!layoutContent.match(/async\s+function\s+\w*Layout/)) {
-        layoutContent = layoutContent.replace(
-          /export\s+default\s+function\s+(\w*Layout)/,
-          "export default async function $1",
-        );
-      }
+      layoutContent = insertImportsAfterLast(layoutContent, importLines);
+      layoutContent = ensureAsyncLayout(layoutContent);
 
       layoutContent = layoutContent.replace(
         /return\s*\(/,
         "const messages = await getMessages();\n\n  return (",
       );
 
-      // Wrap entire body content so all components (Navbar, Footer, etc.) have access
       layoutContent = layoutContent.replace(
         /(<body[^>]*>)/,
         "$1\n        <NextIntlClientProvider messages={messages}>",
@@ -292,18 +328,98 @@ export default getRequestConfig(async () => {
     }
   }
 
-  // 4. Create empty message files
-  const msgDir = join(cwd, messagesDir);
-  await mkdir(msgDir, { recursive: true });
-  for (const locale of allLocales) {
-    const msgFile = join(msgDir, `${locale}.json`);
-    if (!existsSync(msgFile)) {
-      await writeFile(msgFile, "{}\n", "utf-8");
-    }
-  }
+  await createEmptyMessageFiles(
+    join(cwd, messagesDir),
+    allLocales,
+  );
 
   if (filesCreated.length > 0) {
     p.log.success(`next-intl configured: ${filesCreated.join(", ")}`);
+  }
+}
+
+async function dropInlineComponents(
+  cwd: string,
+  componentPath: string,
+): Promise<void> {
+  const fsPath = resolveComponentPath(cwd, componentPath);
+  const dir = join(fsPath, "..");
+  await mkdir(dir, { recursive: true });
+
+  const clientFile = `${fsPath}.tsx`;
+  const serverFile = `${fsPath}-server.tsx`;
+
+  await writeFile(clientFile, CLIENT_TEMPLATE, "utf-8");
+  await writeFile(serverFile, SERVER_TEMPLATE, "utf-8");
+
+  const relClient = relative(cwd, clientFile);
+  const relServer = relative(cwd, serverFile);
+  p.log.success(`Created inline components: ${relClient}, ${relServer}`);
+}
+
+async function setupInlineI18n(
+  cwd: string,
+  componentPath: string,
+  sourceLocale: string,
+  targetLocales: string[],
+  messagesDir: string,
+): Promise<void> {
+  const useSrc = existsSync(join(cwd, "src"));
+  const base = useSrc ? join(cwd, "src") : cwd;
+  const filesCreated: string[] = [];
+
+  const i18nDir = join(base, "i18n");
+  await mkdir(i18nDir, { recursive: true });
+
+  const helperFile = join(i18nDir, "index.ts");
+  if (!existsSync(helperFile)) {
+    const helperContent = generateI18nHelper({
+      sourceLocale,
+      targetLocales,
+      messagesDir,
+    });
+    await writeFile(helperFile, helperContent, "utf-8");
+    filesCreated.push(relative(cwd, helperFile));
+  }
+
+  const layoutPath = findLayoutFile(base);
+
+  if (layoutPath) {
+    let layoutContent = await readFile(layoutPath, "utf-8");
+    if (!layoutContent.includes("I18nProvider")) {
+      const importLines =
+        `import { I18nProvider } from "${componentPath}";\n` +
+        `import { getLocale, getMessages } from "@/i18n";\n`;
+
+      layoutContent = insertImportsAfterLast(layoutContent, importLines);
+      layoutContent = ensureAsyncLayout(layoutContent);
+
+      layoutContent = layoutContent.replace(
+        /return\s*\(/,
+        "const locale = await getLocale();\n\tconst messages = await getMessages(locale);\n\n\treturn (",
+      );
+
+      layoutContent = layoutContent.replace(
+        /(<body[^>]*>)/,
+        "$1\n\t\t\t\t<I18nProvider messages={messages}>",
+      );
+      layoutContent = layoutContent.replace(
+        /<\/body>/,
+        "\t</I18nProvider>\n\t\t\t</body>",
+      );
+
+      await writeFile(layoutPath, layoutContent, "utf-8");
+      filesCreated.push(relative(cwd, layoutPath) + " (updated)");
+    }
+  }
+
+  await createEmptyMessageFiles(
+    join(cwd, messagesDir),
+    [sourceLocale, ...targetLocales],
+  );
+
+  if (filesCreated.length > 0) {
+    p.log.success(`Inline i18n configured: ${filesCreated.join(", ")}`);
   }
 }
 
@@ -315,7 +431,6 @@ export async function runInitWizard(): Promise<void> {
 
   p.intro("translate-kit setup");
 
-  // Check existing config
   if (existsSync(configPath)) {
     const overwrite = await p.confirm({
       message: "translate-kit.config.ts already exists. Overwrite?",
@@ -327,7 +442,15 @@ export async function runInitWizard(): Promise<void> {
     }
   }
 
-  // 1. AI Provider
+  const mode = await p.select({
+    message: "Translation mode:",
+    options: [
+      { value: "keys" as const, label: "Keys mode", hint: "t('key') + JSON files" },
+      { value: "inline" as const, label: "Inline mode", hint: "<T id='key'>text</T>, text stays in code" },
+    ],
+  });
+  if (p.isCancel(mode)) cancel();
+
   const providerKey = await p.select({
     message: "AI provider:",
     options: Object.entries(AI_PROVIDERS).map(([key, val]) => ({
@@ -340,21 +463,18 @@ export async function runInitWizard(): Promise<void> {
 
   const provider = AI_PROVIDERS[providerKey];
 
-  // 2. Model name
   const modelName = await p.text({
     message: "Model:",
     initialValue: provider.defaultModel,
   });
   if (p.isCancel(modelName)) cancel();
 
-  // 3. Source locale
   const sourceLocale = await p.text({
     message: "Source locale:",
     initialValue: "en",
   });
   if (p.isCancel(sourceLocale)) cancel();
 
-  // 4. Target locales
   const targetLocales = await p.multiselect({
     message: "Target locales:",
     options: LOCALE_OPTIONS.filter((o) => o.value !== sourceLocale),
@@ -362,14 +482,12 @@ export async function runInitWizard(): Promise<void> {
   });
   if (p.isCancel(targetLocales)) cancel();
 
-  // 5. Messages directory
   const messagesDir = await p.text({
     message: "Messages directory:",
     initialValue: "./messages",
   });
   if (p.isCancel(messagesDir)) cancel();
 
-  // 6. Include patterns (auto-detect)
   const detected = detectIncludePatterns(cwd);
   let includePatterns: string[];
 
@@ -389,21 +507,31 @@ export async function runInitWizard(): Promise<void> {
     includePatterns = customPatterns.split(",").map((s) => s.trim());
   }
 
-  // 7. i18n library
-  const i18nImport = await p.text({
-    message: "i18n library:",
-    initialValue: "next-intl",
-  });
-  if (p.isCancel(i18nImport)) cancel();
+  let i18nImport = "";
+  let componentPath: string | undefined;
 
-  // 8. Project context
+  if (mode === "inline") {
+    const cp = await p.text({
+      message: "Component import path:",
+      initialValue: "@/components/t",
+    });
+    if (p.isCancel(cp)) cancel();
+    componentPath = cp;
+  } else {
+    const lib = await p.text({
+      message: "i18n library:",
+      initialValue: "next-intl",
+    });
+    if (p.isCancel(lib)) cancel();
+    i18nImport = lib;
+  }
+
   const context = await p.text({
     message: "Project context (optional, for better translations):",
     placeholder: "e.g. E-commerce platform, SaaS dashboard",
   });
   if (p.isCancel(context)) cancel();
 
-  // 9. Tone
   const tone = await p.select({
     message: "Tone:",
     options: [
@@ -414,17 +542,11 @@ export async function runInitWizard(): Promise<void> {
   });
   if (p.isCancel(tone)) cancel();
 
-  // --- Verify dependencies before proceeding ---
-
-  // Check AI provider
   await ensurePackageInstalled(cwd, provider.pkg, "AI provider");
 
-  // Check i18n library
   if (i18nImport) {
     await ensurePackageInstalled(cwd, i18nImport, "i18n library");
   }
-
-  // --- Write config ---
 
   const configContent = generateConfigFile({
     providerKey,
@@ -436,18 +558,20 @@ export async function runInitWizard(): Promise<void> {
     i18nImport,
     context: context ?? "",
     tone,
+    mode,
+    componentPath,
   });
 
   await writeFile(configPath, configContent, "utf-8");
   p.log.success("Created translate-kit.config.ts");
 
-  // --- Setup i18n library ---
-
-  if (i18nImport === "next-intl") {
+  if (mode === "inline" && componentPath) {
+    await dropInlineComponents(cwd, componentPath);
+    await setupInlineI18n(cwd, componentPath, sourceLocale, targetLocales, messagesDir);
+  } else if (i18nImport === "next-intl") {
     await setupNextIntl(cwd, sourceLocale, targetLocales, messagesDir);
   }
 
-  // Ask to run pipeline
   const runPipeline = await p.confirm({
     message: "Run the full pipeline now?",
   });
@@ -458,7 +582,6 @@ export async function runInitWizard(): Promise<void> {
     return;
   }
 
-  // Load config via c12/jiti
   let config;
   try {
     config = await loadTranslateKitConfig();
@@ -477,20 +600,17 @@ export async function runInitWizard(): Promise<void> {
     i18nImport,
   };
 
-  // Step 1: Scan
   const s1 = p.spinner();
   s1.start("Scanning...");
   const scanResult = await scan(scanOptions, cwd);
-  const bareStrings = scanResult.strings.filter((s) => s.type !== "t-call");
-  // Only keep types that codegen can transform
-  const transformableStrings = bareStrings.filter(
+  const transformableStrings = scanResult.strings.filter(
     (s) =>
       s.type === "jsx-text" ||
       s.type === "jsx-attribute" ||
       s.type === "object-property",
   );
   s1.stop(
-    `Scanning... ${bareStrings.length} strings from ${scanResult.fileCount} files`,
+    `Scanning... ${transformableStrings.length} strings from ${scanResult.fileCount} files`,
   );
 
   if (transformableStrings.length === 0) {
@@ -499,18 +619,15 @@ export async function runInitWizard(): Promise<void> {
     return;
   }
 
-  // Step 2: Generate keys (preserving existing map for idempotency)
   const resolvedMessagesDir = join(cwd, messagesDir);
   await mkdir(resolvedMessagesDir, { recursive: true });
 
   let existingMap: Record<string, string> = {};
   const mapPath = join(resolvedMessagesDir, ".translate-map.json");
-  if (existsSync(mapPath)) {
-    try {
-      existingMap = JSON.parse(await readFile(mapPath, "utf-8"));
-    } catch {
-      // Fresh start — no existing map file
-    }
+  try {
+    existingMap = JSON.parse(await readFile(mapPath, "utf-8"));
+  } catch {
+    // No existing map file — fresh start
   }
 
   const s2 = p.spinner();
@@ -525,7 +642,6 @@ export async function runInitWizard(): Promise<void> {
   });
   s2.stop("Generating keys... done");
 
-  // Step 3: Write map and source messages
   await writeFile(mapPath, JSON.stringify(textToKey, null, 2) + "\n", "utf-8");
 
   const messages: Record<string, string> = {};
@@ -533,11 +649,17 @@ export async function runInitWizard(): Promise<void> {
     messages[key] = text;
   }
 
-  const sourceFile = join(resolvedMessagesDir, `${sourceLocale}.json`);
-  const nested = unflatten(messages);
-  await writeFile(sourceFile, JSON.stringify(nested, null, 2) + "\n", "utf-8");
+  let sourceFlat: Record<string, string>;
 
-  // Step 4: Codegen
+  if (mode === "inline") {
+    sourceFlat = messages;
+  } else {
+    const sourceFile = join(resolvedMessagesDir, `${sourceLocale}.json`);
+    const nested = unflatten(messages);
+    await writeFile(sourceFile, JSON.stringify(nested, null, 2) + "\n", "utf-8");
+    sourceFlat = messages;
+  }
+
   const s3 = p.spinner();
   s3.start("Codegen...");
   const codegenResult = await codegen(
@@ -546,6 +668,8 @@ export async function runInitWizard(): Promise<void> {
       exclude: ["**/*.test.*", "**/*.spec.*"],
       textToKey,
       i18nImport,
+      mode,
+      componentPath,
     },
     cwd,
   );
@@ -553,9 +677,7 @@ export async function runInitWizard(): Promise<void> {
     `Codegen... ${codegenResult.stringsWrapped} strings wrapped in ${codegenResult.filesModified} files`,
   );
 
-  // Step 5: Reconcile en.json — only keep keys that codegen actually wrapped
   const postScan = await scan(scanOptions, cwd);
-  const tCalls = postScan.strings.filter((s) => s.type === "t-call");
 
   const keyToText: Record<string, string> = {};
   for (const [text, key] of Object.entries(textToKey)) {
@@ -563,23 +685,41 @@ export async function runInitWizard(): Promise<void> {
   }
 
   const reconciledMessages: Record<string, string> = {};
-  for (const tCall of tCalls) {
-    const key = tCall.text;
-    if (key in keyToText) {
-      reconciledMessages[key] = keyToText[key];
+
+  if (mode === "inline") {
+    const tComponents = postScan.strings.filter((s) => s.type === "T-component" && s.id);
+    const inlineTCalls = postScan.strings.filter((s) => s.type === "t-call" && s.id);
+    for (const tc of tComponents) {
+      if (tc.id && tc.id in keyToText) {
+        reconciledMessages[tc.id] = keyToText[tc.id];
+      }
     }
+    for (const tc of inlineTCalls) {
+      if (tc.id && tc.id in keyToText) {
+        reconciledMessages[tc.id] = keyToText[tc.id];
+      }
+    }
+  } else {
+    const tCalls = postScan.strings.filter((s) => s.type === "t-call");
+    for (const tCall of tCalls) {
+      const key = tCall.text;
+      if (key in keyToText) {
+        reconciledMessages[key] = keyToText[key];
+      }
+    }
+
+    const sourceFile = join(resolvedMessagesDir, `${sourceLocale}.json`);
+    const reconciledNested = unflatten(reconciledMessages);
+    await writeFile(
+      sourceFile,
+      JSON.stringify(reconciledNested, null, 2) + "\n",
+      "utf-8",
+    );
   }
 
-  const reconciledNested = unflatten(reconciledMessages);
-  await writeFile(
-    sourceFile,
-    JSON.stringify(reconciledNested, null, 2) + "\n",
-    "utf-8",
-  );
+  sourceFlat = reconciledMessages;
 
-  // Step 6: Translate each target locale
   const translationOpts = config.translation ?? {};
-  const sourceFlat = reconciledMessages;
 
   for (const locale of targetLocales) {
     const st = p.spinner();
@@ -594,7 +734,7 @@ export async function runInitWizard(): Promise<void> {
     });
 
     const targetFile = join(resolvedMessagesDir, `${locale}.json`);
-    await writeTranslation(targetFile, translated);
+    await writeTranslation(targetFile, translated, { flat: mode === "inline" });
 
     const lockData = await loadLockFile(resolvedMessagesDir);
     await writeLockFile(

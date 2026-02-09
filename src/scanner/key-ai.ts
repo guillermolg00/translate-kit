@@ -81,7 +81,7 @@ async function generateKeysBatchWithRetry(
     } catch (error) {
       lastError = error as Error;
       if (attempt < retries) {
-        const delay = Math.pow(2, attempt) * 1000;
+        const delay = Math.min(Math.pow(2, attempt) * 1000, 30_000);
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }

@@ -11,7 +11,8 @@ translate-kit is an AI-powered translation SDK that generates translations at bu
 - **Incremental** — only new or modified keys get translated via a lock file system
 - **Any provider** — OpenAI, Anthropic, Google, Mistral, Groq, or any Vercel AI SDK provider
 - **Scanner** — extract translatable strings from JSX/TSX source code
-- **Codegen** — replace hardcoded strings with `t()` calls and inject imports
+- **Codegen** — replace hardcoded strings with `t()` calls or `<T>` components
+- **Two modes** — keys mode (`t("key")`) or [inline mode](/docs/guides/inline-mode) (`<T id="key">text</T>`)
 - **next-intl ready** — generates `useTranslations`-compatible message files
 
 ## How It Works
@@ -23,7 +24,7 @@ scan → codegen → translate
 ```
 
 1. **Scan** — parse JSX/TSX files, extract translatable strings, generate semantic keys via AI
-2. **Codegen** — replace hardcoded strings with `t("key")` calls, add imports and hooks
+2. **Codegen** — replace hardcoded strings with `t("key")` calls or `<T id="key">text</T>` components
 3. **Translate** — diff source messages against a lock file, translate only new/modified keys
 
 You can use any step independently or run the full pipeline. The `translate` command is the most commonly used on its own — write your source messages manually and let translate-kit handle the rest.

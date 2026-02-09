@@ -3,6 +3,7 @@ export type {
   TranslateKitConfig,
   TranslationOptions,
   ScanOptions,
+  InlineOptions,
   DiffResult,
   ExtractedString,
   TranslationResult,

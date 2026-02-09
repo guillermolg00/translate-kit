@@ -38,6 +38,8 @@ translate-kit translate --force
 
 ## How It Works
 
+### Keys mode (default)
+
 For each target locale:
 
 1. Load the source locale JSON (e.g. `messages/en.json`)
@@ -45,8 +47,15 @@ For each target locale:
 3. Flatten nested keys for comparison
 4. Compute diff — added, modified, removed, and unchanged keys
 5. Send added/modified keys to the AI model in batches
-6. Merge translations back into the target JSON
+6. Merge translations back into the target JSON (nested structure)
 7. Update the lock file with current source hashes
+
+### Inline mode
+
+The same pipeline applies, but with two differences:
+
+1. **Source**: reads `.translate-map.json` (inverted: key → text) instead of `en.json`
+2. **Output**: target JSON files are flat (`{"hero.welcome": "..."}`) since the `<T>` component does flat key lookup
 
 The lock file (`.translate-lock.json`) stores SHA-256 hashes of source values. If a source value changes, its key is marked as modified and re-translated.
 

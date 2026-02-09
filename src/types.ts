@@ -17,13 +17,19 @@ export interface ScanOptions {
   i18nImport?: string;
 }
 
+export interface InlineOptions {
+  componentPath: string;
+}
+
 export interface TranslateKitConfig {
   model: LanguageModel;
+  mode?: "keys" | "inline";
   sourceLocale: string;
   targetLocales: string[];
   messagesDir: string;
   translation?: TranslationOptions;
   scan?: ScanOptions;
+  inline?: InlineOptions;
 }
 
 export interface DiffResult {
@@ -44,13 +50,15 @@ export interface ExtractedString {
     | "jsx-attribute"
     | "jsx-expression"
     | "object-property"
-    | "t-call";
+    | "t-call"
+    | "T-component";
   file: string;
   line: number;
   column: number;
   componentName?: string;
   propName?: string;
   parentTag?: string;
+  id?: string;
 }
 
 export interface TranslationResult {

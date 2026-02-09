@@ -3,7 +3,7 @@ title: codegen
 description: Replace hardcoded strings with t() calls.
 ---
 
-The `codegen` command transforms your source files by replacing hardcoded strings with `t()` calls and injecting the necessary imports and hooks.
+The `codegen` command transforms your source files by replacing hardcoded strings with `t()` calls (keys mode) or `<T>` components (inline mode), and injecting the necessary imports and hooks.
 
 ## Usage
 
@@ -75,3 +75,43 @@ function MyComponent() {
 ```
 
 The hook is only injected in components that actually have `t()` calls.
+
+## Inline Mode
+
+When `mode` is `"inline"`, codegen uses `<T>` components instead of `t()` for JSX text:
+
+### JSX Text Wrapping
+
+```tsx
+// Before
+<h1>Welcome</h1>
+
+// After
+<h1><T id="hero.welcome">Welcome</T></h1>
+```
+
+### Attribute Replacement
+
+```tsx
+// Before
+<input placeholder="Enter name" />
+
+// After
+<input placeholder={t("Enter name", "form.enterName")} />
+```
+
+The `t()` function in inline mode takes two arguments: the source text and the key.
+
+### Import Injection
+
+Codegen detects whether a file is a client or server component:
+
+- **Client files** (`"use client"`): imports `T` and `useT` from the configured `componentPath`
+- **Server files**: imports `T` and `createT` from `componentPath-server`
+
+### Hook Injection
+
+- **Client**: `const t = useT()`
+- **Server**: `const t = createT()`
+
+See the [Inline Mode guide](/docs/guides/inline-mode) for full details.

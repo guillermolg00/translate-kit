@@ -2,36 +2,47 @@ import { loadConfig } from "c12";
 import { z } from "zod";
 import type { TranslateKitConfig } from "./types.js";
 
-const configSchema = z.object({
-  model: z.custom<TranslateKitConfig["model"]>(
-    (val) => val != null && typeof val === "object",
-    { message: "model must be an AI SDK LanguageModel instance" },
-  ),
-  sourceLocale: z.string().min(1),
-  targetLocales: z.array(z.string().min(1)).min(1),
-  messagesDir: z.string().min(1),
-  translation: z
-    .object({
-      batchSize: z.number().int().positive().default(50),
-      context: z.string().optional(),
-      glossary: z.record(z.string()).optional(),
-      tone: z.string().optional(),
-      retries: z.number().int().min(0).default(2),
-      concurrency: z.number().int().positive().default(3),
-    })
-    .optional(),
-  scan: z
-    .object({
-      include: z.array(z.string()),
-      exclude: z.array(z.string()).optional(),
-      keyStrategy: z.enum(["hash", "path"]).default("hash"),
-      translatableProps: z
-        .array(z.string())
-        .default(["placeholder", "title", "alt", "aria-label"]),
-      i18nImport: z.string().default("next-intl"),
-    })
-    .optional(),
-});
+const configSchema = z
+  .object({
+    model: z.custom<TranslateKitConfig["model"]>(
+      (val) => val != null && typeof val === "object",
+      { message: "model must be an AI SDK LanguageModel instance" },
+    ),
+    mode: z.enum(["keys", "inline"]).default("keys"),
+    sourceLocale: z.string().min(1),
+    targetLocales: z.array(z.string().min(1)).min(1),
+    messagesDir: z.string().min(1),
+    translation: z
+      .object({
+        batchSize: z.number().int().positive().default(50),
+        context: z.string().optional(),
+        glossary: z.record(z.string()).optional(),
+        tone: z.string().optional(),
+        retries: z.number().int().min(0).default(2),
+        concurrency: z.number().int().positive().default(3),
+      })
+      .optional(),
+    scan: z
+      .object({
+        include: z.array(z.string()),
+        exclude: z.array(z.string()).optional(),
+        keyStrategy: z.enum(["hash", "path"]).default("hash"),
+        translatableProps: z
+          .array(z.string())
+          .default(["placeholder", "title", "alt", "aria-label"]),
+        i18nImport: z.string().default("next-intl"),
+      })
+      .optional(),
+    inline: z
+      .object({
+        componentPath: z.string().min(1),
+      })
+      .optional(),
+  })
+  .refine(
+    (data) => data.mode !== "inline" || data.inline != null,
+    { message: "inline options are required when mode is 'inline'", path: ["inline"] },
+  );
 
 export function defineConfig(config: TranslateKitConfig) {
   return config as TranslateKitConfig;

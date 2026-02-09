@@ -108,6 +108,60 @@ describe("extractor", () => {
     });
   });
 
+  describe("inline-component.tsx", () => {
+    it("extracts T-component with id", () => {
+      const strings = extractFromFixture("inline-component.tsx");
+
+      const tComponents = strings.filter((s) => s.type === "T-component");
+      expect(tComponents).toHaveLength(3);
+      expect(tComponents[0].text).toBe("Welcome to our platform");
+      expect(tComponents[0].id).toBe("hero.welcome");
+      expect(tComponents[1].text).toBe("Get started with your journey today");
+      expect(tComponents[1].id).toBe("hero.getStarted");
+      expect(tComponents[2].text).toBe("Sign up now");
+      expect(tComponents[2].id).toBe("common.signUp");
+    });
+
+    it("extracts inline t(text, id) calls", () => {
+      const strings = extractFromFixture("inline-component.tsx");
+
+      const tCalls = strings.filter((s) => s.type === "t-call" && s.id);
+      expect(tCalls).toHaveLength(1);
+      expect(tCalls[0].text).toBe("Search...");
+      expect(tCalls[0].id).toBe("common.searchPlaceholder");
+    });
+
+    it("extracts bare strings not yet wrapped", () => {
+      const strings = extractFromFixture("inline-component.tsx");
+
+      const jsxText = strings.filter((s) => s.type === "jsx-text");
+      expect(jsxText).toHaveLength(1);
+      expect(jsxText[0].text).toBe("This is a new string");
+    });
+  });
+
+  describe("T-component extraction", () => {
+    it("extracts T-component without id", () => {
+      const code = `function App() { return <T>Hello World</T>; }`;
+      const ast = parseFile(code, "test.tsx");
+      const strings = extractStrings(ast, "test.tsx");
+
+      const tComp = strings.find((s) => s.type === "T-component");
+      expect(tComp).toBeDefined();
+      expect(tComp?.text).toBe("Hello World");
+      expect(tComp?.id).toBeUndefined();
+    });
+
+    it("does not extract T-component with empty text", () => {
+      const code = `function App() { return <T id="k">{variable}</T>; }`;
+      const ast = parseFile(code, "test.tsx");
+      const strings = extractStrings(ast, "test.tsx");
+
+      const tComp = strings.filter((s) => s.type === "T-component");
+      expect(tComp).toHaveLength(0);
+    });
+  });
+
   describe("object properties", () => {
     it("extracts strings from content properties in objects", () => {
       const code = `function Features() {

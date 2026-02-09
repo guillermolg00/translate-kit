@@ -84,9 +84,21 @@ The scanner automatically ignores:
 
 ## Output
 
+### Keys mode (default)
+
 The scan command produces two files:
 
 1. **`.translate-map.json`** — a mapping of extracted text to generated keys
 2. **Source locale JSON** — the message file with generated keys and source text
+
+### Inline mode
+
+In inline mode, scan produces only:
+
+1. **`.translate-map.json`** — same text-to-key mapping
+
+No source locale JSON is created — the source text stays in your code. The scanner also detects existing `<T>` components and inline `t(text, id)` calls to avoid re-processing them.
+
+---
 
 Keys are generated using AI for semantic, namespace-style naming (`common.save`, `nav.dashboard`, `form.enterName`).

@@ -78,6 +78,7 @@ const translateCommand = defineCommand({
     const { sourceLocale, targetLocales, messagesDir, model } = config;
     const opts = config.translation ?? {};
     const verbose = args.verbose;
+    const mode = config.mode ?? "keys";
 
     const locales = args.locale ? [args.locale] : targetLocales;
 
@@ -87,12 +88,24 @@ const translateCommand = defineCommand({
       );
     }
 
-    const sourceFile = join(messagesDir, `${sourceLocale}.json`);
-    const sourceRaw = await loadJsonFile(sourceFile);
-    const sourceFlat = flatten(sourceRaw);
+    let sourceFlat: Record<string, string>;
+
+    if (mode === "inline") {
+      const mapData = await loadMapFile(messagesDir);
+      sourceFlat = {};
+      for (const [text, key] of Object.entries(mapData)) {
+        sourceFlat[key] = text;
+      }
+    } else {
+      const sourceFile = join(messagesDir, `${sourceLocale}.json`);
+      const sourceRaw = await loadJsonFile(sourceFile);
+      sourceFlat = flatten(sourceRaw);
+    }
 
     if (Object.keys(sourceFlat).length === 0) {
-      logError(`No keys found in ${sourceFile}`);
+      logError(mode === "inline"
+        ? `No keys found in .translate-map.json. Run 'translate-kit scan' first.`
+        : `No keys found in ${join(messagesDir, `${sourceLocale}.json`)}`);
       process.exit(1);
     }
 
@@ -155,15 +168,13 @@ const translateCommand = defineCommand({
         }
       }
 
-      // Merge: unchanged + new translations, remove deleted
       const finalFlat: Record<string, string> = {
         ...diffResult.unchanged,
         ...translated,
       };
 
-      await writeTranslation(targetFile, finalFlat);
+      await writeTranslation(targetFile, finalFlat, { flat: mode === "inline" });
 
-      // Update lock file with all source keys that now have translations
       const allTranslatedKeys = Object.keys(finalFlat);
       const currentLock = await loadLockFile(messagesDir);
       await writeLockFile(
@@ -206,6 +217,7 @@ const scanCommand = defineCommand({
   },
   async run({ args }) {
     const config = await loadTranslateKitConfig();
+    const mode = config.mode ?? "keys";
 
     if (!config.scan) {
       logError(
@@ -216,7 +228,11 @@ const scanCommand = defineCommand({
 
     const result = await scan(config.scan);
 
-    const bareStrings = result.strings.filter((s) => s.type !== "t-call");
+    const bareStrings = result.strings.filter((s) => {
+      if (s.type === "t-call") return false;
+      if (s.type === "T-component" && s.id) return false;
+      return true;
+    });
 
     logScanResult(bareStrings.length, result.fileCount);
 
@@ -226,10 +242,32 @@ const scanCommand = defineCommand({
           `"${str.text}" (${str.componentName ?? "unknown"}, ${str.file})`,
         );
       }
+      if (mode === "inline") {
+        logInfo("\n  Inline mode: no source locale JSON will be created. Source text remains in code.");
+      }
       return;
     }
 
     const existingMap = await loadMapFile(config.messagesDir);
+
+    if (mode === "inline") {
+      const existingTComponents = result.strings.filter(
+        (s) => s.type === "T-component" && s.id,
+      );
+      for (const tc of existingTComponents) {
+        if (tc.id && !(tc.text in existingMap)) {
+          existingMap[tc.text] = tc.id;
+        }
+      }
+      const existingInlineTCalls = result.strings.filter(
+        (s) => s.type === "t-call" && s.id,
+      );
+      for (const tc of existingInlineTCalls) {
+        if (tc.id && !(tc.text in existingMap)) {
+          existingMap[tc.text] = tc.id;
+        }
+      }
+    }
 
     logInfo("Generating semantic keys...");
     const textToKey = await generateSemanticKeys({
@@ -246,18 +284,22 @@ const scanCommand = defineCommand({
       `Written .translate-map.json (${Object.keys(textToKey).length} keys)`,
     );
 
-    const messages: Record<string, string> = {};
-    for (const [text, key] of Object.entries(textToKey)) {
-      messages[key] = text;
+    if (mode === "inline") {
+      logInfo("Inline mode: source text stays in code, no source locale JSON created.");
+    } else {
+      const messages: Record<string, string> = {};
+      for (const [text, key] of Object.entries(textToKey)) {
+        messages[key] = text;
+      }
+
+      const sourceFile = join(config.messagesDir, `${config.sourceLocale}.json`);
+      await mkdir(config.messagesDir, { recursive: true });
+      const nested = unflatten(messages);
+      const content = JSON.stringify(nested, null, 2) + "\n";
+      await writeFile(sourceFile, content, "utf-8");
+
+      logSuccess(`Written to ${sourceFile}`);
     }
-
-    const sourceFile = join(config.messagesDir, `${config.sourceLocale}.json`);
-    await mkdir(config.messagesDir, { recursive: true });
-    const nested = unflatten(messages);
-    const content = JSON.stringify(nested, null, 2) + "\n";
-    await writeFile(sourceFile, content, "utf-8");
-
-    logSuccess(`Written to ${sourceFile}`);
   },
 });
 
@@ -275,6 +317,7 @@ const codegenCommand = defineCommand({
   },
   async run({ args }) {
     const config = await loadTranslateKitConfig();
+    const mode = config.mode ?? "keys";
 
     if (!config.scan) {
       logError(
@@ -291,11 +334,20 @@ const codegenCommand = defineCommand({
     }
 
     if (args["dry-run"]) {
-      logInfo(
-        `\n  Would replace ${Object.keys(textToKey).length} strings with t() calls\n`,
-      );
-      for (const [text, key] of Object.entries(textToKey)) {
-        logInfo(`"${text}" → t("${key}")`);
+      if (mode === "inline") {
+        logInfo(
+          `\n  Would wrap ${Object.keys(textToKey).length} strings with <T> components\n`,
+        );
+        for (const [text, key] of Object.entries(textToKey)) {
+          logInfo(`"${text}" → <T id="${key}">${text}</T>`);
+        }
+      } else {
+        logInfo(
+          `\n  Would replace ${Object.keys(textToKey).length} strings with t() calls\n`,
+        );
+        for (const [text, key] of Object.entries(textToKey)) {
+          logInfo(`"${text}" → t("${key}")`);
+        }
       }
       return;
     }
@@ -305,6 +357,8 @@ const codegenCommand = defineCommand({
       exclude: config.scan.exclude,
       textToKey,
       i18nImport: config.scan.i18nImport,
+      mode,
+      componentPath: config.inline?.componentPath,
     });
 
     logSuccess(
@@ -337,10 +391,10 @@ const main = defineCommand({
     init: initCommand,
   },
   // Default to translate command
-  async run({ args, rawArgs }) {
+  async run({ rawArgs }) {
     if (rawArgs.length === 0 || rawArgs[0]?.startsWith("-")) {
       await translateCommand.run!({
-        args: args as any,
+        args: { _: rawArgs, "dry-run": false, force: false, verbose: false, locale: "" },
         rawArgs,
         cmd: translateCommand,
       });

@@ -31,6 +31,8 @@ export function extractStrings(
       const parentTag = getParentTagName(path);
       if (parentTag && isIgnoredTag(parentTag)) return;
 
+      if (parentTag === "T") return;
+
       results.push({
         text,
         type: "jsx-text",
@@ -87,7 +89,6 @@ export function extractStrings(
       const text = expr.value.trim();
       if (shouldIgnore(text)) return;
 
-      // Skip if this is an attribute value (handled in JSXAttribute)
       if (path.parent.type === "JSXAttribute") return;
 
       const parentTag = getParentTagName(path);
@@ -105,10 +106,8 @@ export function extractStrings(
     },
 
     ObjectProperty(path) {
-      // Only extract inside functions (components), not module-level objects like metadata
       if (!isInsideFunction(path)) return;
 
-      // Detect strings in object properties like { title: "Project Management", description: "..." }
       const keyNode = path.node.key;
       if (keyNode.type !== "Identifier" && keyNode.type !== "StringLiteral")
         return;
@@ -144,6 +143,23 @@ export function extractStrings(
       const firstArg = args[0];
       if (firstArg.type !== "StringLiteral") return;
 
+      if (
+        args.length >= 2 &&
+        args[1].type === "StringLiteral"
+      ) {
+        results.push({
+          text: firstArg.value,
+          type: "t-call",
+          file: filePath,
+          line: path.node.loc?.start.line ?? 0,
+          column: path.node.loc?.start.column ?? 0,
+          componentName: getComponentName(path),
+          parentTag: getParentTagName(path),
+          id: args[1].value,
+        });
+        return;
+      }
+
       results.push({
         text: firstArg.value,
         type: "t-call",
@@ -152,6 +168,43 @@ export function extractStrings(
         column: path.node.loc?.start.column ?? 0,
         componentName: getComponentName(path),
         parentTag: getParentTagName(path),
+      });
+    },
+
+    JSXElement(path) {
+      const opening = path.node.openingElement;
+      if (opening.name.type !== "JSXIdentifier" || opening.name.name !== "T") return;
+
+      let id: string | undefined;
+      for (const attr of opening.attributes) {
+        if (
+          attr.type === "JSXAttribute" &&
+          attr.name.type === "JSXIdentifier" &&
+          attr.name.name === "id" &&
+          attr.value?.type === "StringLiteral"
+        ) {
+          id = attr.value.value;
+        }
+      }
+
+      let text = "";
+      for (const child of path.node.children) {
+        if (child.type === "JSXText") {
+          text += child.value;
+        }
+      }
+      text = text.trim();
+      if (!text) return;
+
+      results.push({
+        text,
+        type: "T-component",
+        file: filePath,
+        line: path.node.loc?.start.line ?? 0,
+        column: path.node.loc?.start.column ?? 0,
+        componentName: getComponentName(path),
+        parentTag: getParentTagName(path),
+        id,
       });
     },
   });

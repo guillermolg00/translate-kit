@@ -1,0 +1,170 @@
+---
+title: Inline Mode
+description: Keep source text visible in your code with the <T> component.
+---
+
+Inline mode keeps the source text visible in your code instead of hiding it behind translation keys. Instead of `t("hero.welcome")`, your code reads `<T id="hero.welcome">Welcome</T>`.
+
+## Keys vs Inline
+
+| | Keys mode | Inline mode |
+|---|---|---|
+| **JSX** | `{t("hero.welcome")}` | `<T id="hero.welcome">Welcome</T>` |
+| **Attributes** | `t("form.enterName")` | `t("Enter your name", "form.enterName")` |
+| **Source file** | `en.json` with all keys | No source JSON — text stays in code |
+| **Runtime** | Lookup by key | Lookup by key, fallback to children |
+
+Both modes use the same `scan → codegen → translate` pipeline and produce the same target locale JSON files.
+
+## Setup
+
+Run the init wizard and select **Inline mode**:
+
+```bash
+npx translate-kit init
+```
+
+Or configure manually:
+
+```ts
+import { defineConfig } from "translate-kit";
+import { openai } from "@ai-sdk/openai";
+
+export default defineConfig({
+  model: openai("gpt-4o-mini"),
+  mode: "inline",
+  sourceLocale: "en",
+  targetLocales: ["es", "fr"],
+  messagesDir: "./messages",
+  scan: {
+    include: ["src/**/*.tsx", "app/**/*.tsx"],
+  },
+  inline: {
+    componentPath: "@/components/t",
+  },
+});
+```
+
+## The `<T>` Component
+
+The init wizard copies two files into your project — no runtime dependency on translate-kit:
+
+### Client Component (`t.tsx`)
+
+For use inside `"use client"` components. Uses React Context to receive messages from a provider.
+
+```tsx
+import { T, useT } from "@/components/t";
+
+export function Hero() {
+  const t = useT();
+  return (
+    <section>
+      <h1><T id="hero.welcome">Welcome to our platform</T></h1>
+      <input placeholder={t("Enter your name", "form.enterName")} />
+    </section>
+  );
+}
+```
+
+Exports:
+- `I18nProvider` — wraps your app and provides messages via context
+- `T` — component that looks up `id` in messages, falls back to children
+- `useT` — hook returning a `t(text, id)` function for attributes and object properties
+
+### Server Component (`t-server.tsx`)
+
+For use in React Server Components. Receives messages as props — no context needed.
+
+```tsx
+import { T, createT } from "@/components/t-server";
+
+export default function Page({ messages }) {
+  const t = createT(messages);
+  return (
+    <h1><T id="hero.welcome" messages={messages}>Welcome</T></h1>
+  );
+}
+```
+
+Exports:
+- `T` — accepts a `messages` prop directly
+- `createT` — factory that returns a `t(text, id)` function
+
+### How Fallback Works
+
+When the locale is the source language, pass `messages={}` (or no messages). Every `<T>` falls back to its children, and every `t()` call returns its first argument. Zero overhead for the source locale.
+
+## Workflow
+
+### 1. Scan
+
+```bash
+translate-kit scan
+```
+
+Extracts strings and generates `.translate-map.json`. In inline mode, **no source locale JSON is created** — the source text lives in your code.
+
+### 2. Codegen
+
+```bash
+translate-kit codegen
+```
+
+Wraps strings with `<T>` components and `t()` calls:
+
+```tsx
+// Before
+<h1>Welcome</h1>
+
+// After
+<h1><T id="hero.welcome">Welcome</T></h1>
+```
+
+Codegen also injects the correct imports and hooks based on whether the file is a client or server component.
+
+### 3. Translate
+
+```bash
+translate-kit translate
+```
+
+Reads `.translate-map.json` as the source of truth (instead of `en.json`), then translates to target locales. Target files are flat JSON:
+
+```json
+{
+  "hero.welcome": "Bienvenido a nuestra plataforma",
+  "form.enterName": "Ingresa tu nombre"
+}
+```
+
+## Wiring Up the Provider
+
+For translations to appear at runtime, wrap your root layout with `I18nProvider` and pass the loaded messages. The init wizard sets this up automatically, but the pattern looks like:
+
+```tsx
+// app/layout.tsx
+import { I18nProvider } from "@/components/t";
+import { getLocale, getMessages } from "@/i18n";
+
+export default async function RootLayout({ children }) {
+  const locale = await getLocale();
+  const messages = await getMessages(locale);
+
+  return (
+    <html>
+      <body>
+        <I18nProvider messages={messages}>
+          {children}
+        </I18nProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+The `getLocale()` function parses the `Accept-Language` header and returns the best match from your configured locales. `getMessages()` loads the corresponding JSON file (or returns `{}` for the source locale).
+
+## Idempotency
+
+Running `scan` and `codegen` multiple times is safe. The scanner detects existing `<T>` components and `t()` calls and skips them. New bare strings are picked up and processed normally.

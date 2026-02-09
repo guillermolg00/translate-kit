@@ -18,6 +18,9 @@ export default defineConfig({
   targetLocales: ["es", "fr", "de", "pt", "ja"],
   messagesDir: "./messages",
 
+  // Mode: "keys" (default) or "inline"
+  mode: "keys",
+
   // Translation options
   translation: {
     batchSize: 50,
@@ -39,6 +42,11 @@ export default defineConfig({
     translatableProps: ["placeholder", "title", "alt", "aria-label"],
     i18nImport: "next-intl",
   },
+
+  // Inline mode options (required when mode is "inline")
+  // inline: {
+  //   componentPath: "@/components/t",
+  // },
 });
 ```
 
@@ -50,6 +58,23 @@ export default defineConfig({
 | `sourceLocale` | `string` | Source language code (e.g. `"en"`) |
 | `targetLocales` | `string[]` | Target language codes |
 | `messagesDir` | `string` | Path to messages directory |
+
+## Mode
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `mode` | `"keys" \| "inline"` | `"keys"` | Translation mode. See [Inline Mode](/docs/guides/inline-mode) |
+
+- **`keys`** — replaces strings with `t("key")` calls and generates a source locale JSON file
+- **`inline`** — wraps strings with `<T id="key">text</T>` components, source text stays in code
+
+## Inline Options
+
+Required when `mode` is `"inline"`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `inline.componentPath` | `string` | Import path for the `<T>` component (e.g. `"@/components/t"`) |
 
 ## Translation Options
 

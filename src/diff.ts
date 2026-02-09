@@ -53,18 +53,14 @@ export function computeDiff(
     const lockedHash = lockData[key];
 
     if (!(key in targetFlat)) {
-      // Key doesn't exist in target — new key
       added[key] = value;
     } else if (!lockedHash || lockedHash !== currentHash) {
-      // Source value changed since last translation
       modified[key] = value;
     } else {
-      // Source unchanged, translation exists
       unchanged[key] = targetFlat[key];
     }
   }
 
-  // Keys in target that are no longer in source
   for (const key of Object.keys(targetFlat)) {
     if (!(key in sourceFlat)) {
       removed.push(key);

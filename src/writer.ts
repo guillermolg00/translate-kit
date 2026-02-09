@@ -7,10 +7,11 @@ import type { LockFile } from "./types.js";
 export async function writeTranslation(
   filePath: string,
   flatEntries: Record<string, string>,
+  options?: { flat?: boolean },
 ): Promise<void> {
   await mkdir(dirname(filePath), { recursive: true });
-  const nested = unflatten(flatEntries);
-  const content = JSON.stringify(nested, null, 2) + "\n";
+  const data = options?.flat ? flatEntries : unflatten(flatEntries);
+  const content = JSON.stringify(data, null, 2) + "\n";
   await writeFile(filePath, content, "utf-8");
 }
 

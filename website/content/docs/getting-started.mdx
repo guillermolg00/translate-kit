@@ -30,11 +30,13 @@ npx translate-kit init
 ```
 
 This wizard will:
-1. Ask you to choose an AI provider
-2. Configure source and target locales
-3. Set up your messages directory
-4. Generate a `translate-kit.config.ts` file
-5. Optionally scaffold next-intl integration
+1. Ask you to choose a translation mode — [keys or inline](/docs/guides/inline-mode)
+2. Ask you to choose an AI provider
+3. Configure source and target locales
+4. Set up your messages directory
+5. Generate a `translate-kit.config.ts` file
+6. For inline mode: copy the `<T>` component and set up `I18nProvider`
+7. For keys mode: optionally scaffold next-intl integration
 
 ### Manual Setup
 
