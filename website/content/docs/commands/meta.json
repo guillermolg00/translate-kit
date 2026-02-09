@@ -1,4 +1,4 @@
 {
   "title": "Commands",
-  "pages": ["translate", "scan", "codegen", "init"]
+  "pages": ["init", "scan", "codegen", "translate"]
 }

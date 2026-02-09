@@ -3,21 +3,90 @@ title: Getting Started
 description: Install and set up translate-kit in your project.
 ---
 
-## Installation
-
-Install translate-kit and an AI provider SDK:
-
-```bash tab="npm"
-npm install translate-kit @ai-sdk/openai
-```
+## Install translate-kit
 
 ```bash tab="bun"
-bun add translate-kit @ai-sdk/openai
+bun add translate-kit
+```
+
+```bash tab="npm"
+npm install translate-kit
 ```
 
 ```bash tab="pnpm"
-pnpm add translate-kit @ai-sdk/openai
+pnpm add translate-kit
 ```
+
+## Install an AI provider
+
+translate-kit uses the [Vercel AI SDK](https://sdk.vercel.ai/) under the hood. Install the provider package for the model you want to use:
+
+```bash tab="OpenAI"
+bun add @ai-sdk/openai
+```
+
+```bash tab="Anthropic"
+bun add @ai-sdk/anthropic
+```
+
+```bash tab="Google"
+bun add @ai-sdk/google
+```
+
+```bash tab="Mistral"
+bun add @ai-sdk/mistral
+```
+
+```bash tab="Groq"
+bun add @ai-sdk/groq
+```
+
+Then set the corresponding API key in your environment:
+
+```bash tab="OpenAI"
+# .env
+OPENAI_API_KEY=sk-...
+```
+
+```bash tab="Anthropic"
+# .env
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+```bash tab="Google"
+# .env
+GOOGLE_GENERATIVE_AI_API_KEY=...
+```
+
+```bash tab="Mistral"
+# .env
+MISTRAL_API_KEY=...
+```
+
+```bash tab="Groq"
+# .env
+GROQ_API_KEY=gsk_...
+```
+
+Any provider supported by the Vercel AI SDK works. See the full list in the [AI Providers](/docs/guides/providers) guide.
+
+## Install next-intl
+
+translate-kit generates message files compatible with [next-intl](https://next-intl.dev/), the only i18n runtime supported at the moment. Install it as a dependency of your project:
+
+```bash tab="bun"
+bun add next-intl
+```
+
+```bash tab="npm"
+npm install next-intl
+```
+
+```bash tab="pnpm"
+pnpm add next-intl
+```
+
+Follow the [next-intl setup guide](https://next-intl.dev/docs/getting-started/app-router/with-i18n-routing) to configure routing and providers in your Next.js app. translate-kit handles the message files — next-intl handles the runtime.
 
 ## Setup
 
@@ -26,7 +95,7 @@ pnpm add translate-kit @ai-sdk/openai
 The fastest way to get started is with the `init` command:
 
 ```bash
-npx translate-kit init
+bunx translate-kit init
 ```
 
 This wizard will:
@@ -42,7 +111,7 @@ This wizard will:
 
 Create a `translate-kit.config.ts` at your project root:
 
-```ts
+```ts tab="OpenAI"
 import { defineConfig } from "translate-kit";
 import { openai } from "@ai-sdk/openai";
 
@@ -54,11 +123,28 @@ export default defineConfig({
 });
 ```
 
-Set your API key as an environment variable:
+```ts tab="Anthropic"
+import { defineConfig } from "translate-kit";
+import { anthropic } from "@ai-sdk/anthropic";
 
-```bash
-# .env
-OPENAI_API_KEY=sk-...
+export default defineConfig({
+  model: anthropic("claude-sonnet-4-20250514"),
+  sourceLocale: "en",
+  targetLocales: ["es", "fr", "de"],
+  messagesDir: "./messages",
+});
+```
+
+```ts tab="Google"
+import { defineConfig } from "translate-kit";
+import { google } from "@ai-sdk/google";
+
+export default defineConfig({
+  model: google("gemini-2.0-flash"),
+  sourceLocale: "en",
+  targetLocales: ["es", "fr", "de"],
+  messagesDir: "./messages",
+});
 ```
 
 ## Your First Translation
@@ -82,7 +168,7 @@ Create your source messages file:
 Run the translate command:
 
 ```bash
-npx translate-kit translate
+bunx translate-kit translate
 ```
 
 This generates `messages/es.json`, `messages/fr.json`, and `messages/de.json` with AI-translated content. Only new or modified keys are translated on subsequent runs.
