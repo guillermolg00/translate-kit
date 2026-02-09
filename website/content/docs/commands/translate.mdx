@@ -1,0 +1,55 @@
+---
+title: translate
+description: Translate messages to all target locales.
+---
+
+The `translate` command is the core of translate-kit. It reads your source locale JSON, computes a diff against existing translations, and sends only new or modified keys to the AI for translation.
+
+## Usage
+
+```bash
+translate-kit translate
+```
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Preview changes without writing files |
+| `--force` | Ignore lock file, re-translate everything |
+| `--locale <code>` | Translate only a specific locale |
+| `--verbose` | Show detailed output |
+
+## Examples
+
+```bash
+# Translate all target locales
+translate-kit translate
+
+# Only translate Spanish
+translate-kit translate --locale es
+
+# Preview what would be translated
+translate-kit translate --dry-run
+
+# Force re-translate everything
+translate-kit translate --force
+```
+
+## How It Works
+
+For each target locale:
+
+1. Load the source locale JSON (e.g. `messages/en.json`)
+2. Load the existing target JSON and lock file
+3. Flatten nested keys for comparison
+4. Compute diff — added, modified, removed, and unchanged keys
+5. Send added/modified keys to the AI model in batches
+6. Merge translations back into the target JSON
+7. Update the lock file with current source hashes
+
+The lock file (`.translate-lock.json`) stores SHA-256 hashes of source values. If a source value changes, its key is marked as modified and re-translated.
+
+## Batching
+
+Keys are sent to the AI in batches controlled by `translation.batchSize` (default: 50). Multiple batches run in parallel up to `translation.concurrency` (default: 3). Failed batches are retried up to `translation.retries` times (default: 2).

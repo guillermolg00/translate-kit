@@ -1,0 +1,83 @@
+---
+title: next-intl Integration
+description: Using translate-kit with next-intl.
+---
+
+translate-kit is designed to work seamlessly with [next-intl](https://next-intl.dev/). The generated message files are directly compatible with `useTranslations`.
+
+## Setup
+
+The `init` command can scaffold next-intl integration automatically:
+
+```bash
+npx translate-kit init
+```
+
+When you select next-intl as your i18n library, the wizard creates:
+
+- `i18n/request.ts` with locale detection
+- Updates `next.config.ts` with `createNextIntlPlugin`
+
+## Message Format
+
+translate-kit generates nested JSON files that next-intl expects:
+
+```json
+{
+  "common": {
+    "save": "Guardar",
+    "cancel": "Cancelar"
+  },
+  "auth": {
+    "login": "Iniciar sesion",
+    "signup": "Registrarse"
+  }
+}
+```
+
+## Using with the Scanner
+
+When `scan.i18nImport` is set to `"next-intl"` (the default), the codegen step:
+
+1. Adds `import { useTranslations } from "next-intl"` to components
+2. Injects `const t = useTranslations()` in component bodies
+3. Replaces hardcoded strings with `{t("key")}` calls
+
+### Before
+
+```tsx
+function Hero() {
+  return (
+    <div>
+      <h1>Welcome to our platform</h1>
+      <p>Get started today</p>
+    </div>
+  );
+}
+```
+
+### After
+
+```tsx
+import { useTranslations } from "next-intl";
+
+function Hero() {
+  const t = useTranslations();
+  return (
+    <div>
+      <h1>{t("hero.welcome")}</h1>
+      <p>{t("hero.getStarted")}</p>
+    </div>
+  );
+}
+```
+
+## Workflow
+
+A typical next-intl + translate-kit workflow:
+
+1. Write components with hardcoded English strings
+2. Run `translate-kit scan` to extract strings and generate keys
+3. Run `translate-kit codegen` to replace strings with `t()` calls
+4. Run `translate-kit translate` to generate translations
+5. On subsequent changes, run `translate-kit translate` to update only what changed

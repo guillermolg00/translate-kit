@@ -1,0 +1,57 @@
+---
+title: Incremental Translations
+description: How the diff and lock file system works.
+---
+
+translate-kit uses a lock file system to avoid re-translating unchanged content. This makes subsequent runs fast and cheap.
+
+## The Lock File
+
+When you run `translate-kit translate`, a `.translate-lock.json` file is created in your messages directory. It stores SHA-256 hashes of each source value:
+
+```json
+{
+  "common.save": "a3f5c8d2e1b4",
+  "common.cancel": "7e2b4f9c1a6d",
+  "auth.login": "b1c3d5e7f9a2"
+}
+```
+
+## Diff Computation
+
+On each run, translate-kit computes a diff by comparing:
+
+- Source locale JSON (current state)
+- Target locale JSON (existing translations)
+- Lock file (previous source hashes)
+
+Keys are classified as:
+
+| Status | Condition | Action |
+|--------|-----------|--------|
+| **Added** | Key exists in source but not in target | Translate |
+| **Modified** | Source hash differs from lock file | Re-translate |
+| **Removed** | Key exists in target but not in source | Remove from target |
+| **Unchanged** | Source hash matches lock file | Skip |
+
+Only **added** and **modified** keys are sent to the AI model.
+
+## Force Re-translation
+
+To ignore the lock file and re-translate everything:
+
+```bash
+translate-kit translate --force
+```
+
+This is useful when you change the AI model, context, glossary, or tone and want all translations regenerated.
+
+## Previewing Changes
+
+Use `--dry-run` to see what would be translated without making any changes:
+
+```bash
+translate-kit translate --dry-run
+```
+
+This shows the diff for each locale — how many keys would be added, modified, removed, or skipped.

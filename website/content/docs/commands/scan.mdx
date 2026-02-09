@@ -1,0 +1,92 @@
+---
+title: scan
+description: Scan source code for translatable strings.
+---
+
+The `scan` command parses your JSX/TSX source files and extracts translatable strings using Babel AST analysis.
+
+## Usage
+
+```bash
+translate-kit scan
+```
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Preview found strings without writing files |
+
+## Requirements
+
+The `scan` config section must be defined in your config:
+
+```ts
+export default defineConfig({
+  // ...
+  scan: {
+    include: ["src/**/*.tsx", "app/**/*.tsx"],
+    exclude: ["**/*.test.*"],
+  },
+});
+```
+
+## What Gets Extracted
+
+The scanner finds translatable strings in four categories:
+
+### JSX Text
+
+```tsx
+<h1>Welcome to our platform</h1>
+// → "Welcome to our platform"
+```
+
+### JSX Attributes
+
+```tsx
+<input placeholder="Enter your name" />
+// → "Enter your name"
+```
+
+Default translatable props: `placeholder`, `title`, `alt`, `aria-label`, `aria-description`, `aria-placeholder`, `label`.
+
+### Expression Containers
+
+```tsx
+<div>{"Hello world"}</div>
+// → "Hello world"
+```
+
+### Object Properties
+
+```tsx
+const items = [
+  { title: "Dashboard", description: "View your stats" },
+];
+// → "Dashboard", "View your stats"
+```
+
+Only content-related property names are extracted: `title`, `description`, `label`, `text`, `content`, `heading`, `subtitle`, `caption`, `summary`, `message`, `placeholder`, `alt`.
+
+## What Gets Filtered Out
+
+The scanner automatically ignores:
+
+- Strings already wrapped in `t()` calls
+- Whitespace-only content
+- URLs and email addresses
+- CSS class names and identifiers
+- `CONSTANT_CASE` values
+- Numbers and currency symbols
+- Content inside `<script>`, `<style>`, `<code>`, `<pre>`, `<svg>` tags
+- Non-translatable attributes (`className`, `id`, `href`, `src`, `type`, etc.)
+
+## Output
+
+The scan command produces two files:
+
+1. **`.translate-map.json`** — a mapping of extracted text to generated keys
+2. **Source locale JSON** — the message file with generated keys and source text
+
+Keys are generated using AI for semantic, namespace-style naming (`common.save`, `nav.dashboard`, `form.enterName`).

@@ -1,0 +1,80 @@
+---
+title: Configuration
+description: Full configuration reference for translate-kit.
+---
+
+translate-kit is configured via a `translate-kit.config.ts` file at your project root. The config is loaded using [c12](https://github.com/unjs/c12) and validated with [Zod](https://zod.dev/).
+
+## Full Example
+
+```ts
+import { defineConfig } from "translate-kit";
+import { openai } from "@ai-sdk/openai";
+
+export default defineConfig({
+  // Required
+  model: openai("gpt-4o-mini"),
+  sourceLocale: "en",
+  targetLocales: ["es", "fr", "de", "pt", "ja"],
+  messagesDir: "./messages",
+
+  // Translation options
+  translation: {
+    batchSize: 50,
+    concurrency: 3,
+    context: "SaaS application for project management",
+    glossary: {
+      "Acme": "Acme",
+      "Dashboard": "Dashboard",
+    },
+    tone: "professional",
+    retries: 2,
+  },
+
+  // Scanner options (for scan + codegen commands)
+  scan: {
+    include: ["src/**/*.tsx", "app/**/*.tsx"],
+    exclude: ["**/*.test.*"],
+    keyStrategy: "hash",
+    translatableProps: ["placeholder", "title", "alt", "aria-label"],
+    i18nImport: "next-intl",
+  },
+});
+```
+
+## Required Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `model` | `LanguageModel` | Vercel AI SDK model instance |
+| `sourceLocale` | `string` | Source language code (e.g. `"en"`) |
+| `targetLocales` | `string[]` | Target language codes |
+| `messagesDir` | `string` | Path to messages directory |
+
+## Translation Options
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `batchSize` | `number` | `50` | Keys per AI request |
+| `concurrency` | `number` | `3` | Parallel batch limit |
+| `context` | `string` | — | Project context for better translations |
+| `glossary` | `Record<string, string>` | — | Terms that should not be translated |
+| `tone` | `string` | — | Translation tone (e.g. `"professional"`, `"casual"`) |
+| `retries` | `number` | `2` | Retry attempts on failure |
+
+## Scanner Options
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `include` | `string[]` | — | Glob patterns for files to scan |
+| `exclude` | `string[]` | — | Glob patterns to exclude |
+| `keyStrategy` | `"hash" \| "path"` | `"hash"` | Key generation strategy |
+| `translatableProps` | `string[]` | `["placeholder", "title", "alt", "aria-label"]` | JSX props to extract |
+| `i18nImport` | `string` | `"next-intl"` | i18n library import source |
+
+### Key Strategies
+
+- **`hash`** — generates stable 12-character SHA-256 hashes. Good for large codebases where readability is less important.
+- **`path`** — generates human-readable keys like `ComponentName.parentTag.slug`. More readable but may change if components are renamed.
+
+AI semantic key generation is used automatically during `scan` to produce namespace-style keys like `common.save`, `nav.dashboard`, `form.enterName`.

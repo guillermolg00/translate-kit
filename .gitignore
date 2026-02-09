@@ -6,3 +6,9 @@ dist
 *.tsbuildinfo
 .DS_Store
 coverage/
+
+# Website
+website/.next
+website/node_modules
+website/.source
+.vercel

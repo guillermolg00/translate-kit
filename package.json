@@ -4,6 +4,27 @@
   "description": "AI-powered translation SDK for build time. Compatible with next-intl.",
   "type": "module",
   "license": "MIT",
+  "author": "guillermolg00",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/guillermolg00/translate-kit.git"
+  },
+  "homepage": "https://github.com/guillermolg00/translate-kit",
+  "bugs": "https://github.com/guillermolg00/translate-kit/issues",
+  "keywords": [
+    "translate",
+    "i18n",
+    "internationalization",
+    "next-intl",
+    "ai",
+    "translation",
+    "build-time",
+    "vercel-ai-sdk",
+    "localization"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "bin": {
     "translate-kit": "./dist/cli.js"
   },

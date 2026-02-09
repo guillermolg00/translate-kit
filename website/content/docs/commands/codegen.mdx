@@ -1,0 +1,77 @@
+---
+title: codegen
+description: Replace hardcoded strings with t() calls.
+---
+
+The `codegen` command transforms your source files by replacing hardcoded strings with `t()` calls and injecting the necessary imports and hooks.
+
+## Usage
+
+```bash
+translate-kit codegen
+```
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Preview changes without writing files |
+
+## Prerequisites
+
+Run `scan` first to generate the `.translate-map.json` file that codegen uses to map strings to keys.
+
+## Transformations
+
+### JSX Text Replacement
+
+```tsx
+// Before
+<h1>Welcome</h1>
+
+// After
+<h1>{t("common.welcome")}</h1>
+```
+
+### Attribute Replacement
+
+```tsx
+// Before
+<input placeholder="Enter name" />
+
+// After
+<input placeholder={t("form.enterName")} />
+```
+
+### Object Property Replacement
+
+```tsx
+// Before
+const item = { title: "Dashboard" };
+
+// After
+const item = { title: t("nav.dashboard") };
+```
+
+### Import Injection
+
+If missing, codegen adds the i18n import:
+
+```ts
+import { useTranslations } from "next-intl";
+```
+
+The import source is configured via `scan.i18nImport` (default: `"next-intl"`).
+
+### Hook Injection
+
+Codegen adds the `useTranslations` hook to components that use `t()`:
+
+```tsx
+function MyComponent() {
+  const t = useTranslations();
+  // ...
+}
+```
+
+The hook is only injected in components that actually have `t()` calls.

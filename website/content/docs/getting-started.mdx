@@ -1,0 +1,86 @@
+---
+title: Getting Started
+description: Install and set up translate-kit in your project.
+---
+
+## Installation
+
+Install translate-kit and an AI provider SDK:
+
+```bash tab="npm"
+npm install translate-kit @ai-sdk/openai
+```
+
+```bash tab="bun"
+bun add translate-kit @ai-sdk/openai
+```
+
+```bash tab="pnpm"
+pnpm add translate-kit @ai-sdk/openai
+```
+
+## Setup
+
+### Interactive Setup
+
+The fastest way to get started is with the `init` command:
+
+```bash
+npx translate-kit init
+```
+
+This wizard will:
+1. Ask you to choose an AI provider
+2. Configure source and target locales
+3. Set up your messages directory
+4. Generate a `translate-kit.config.ts` file
+5. Optionally scaffold next-intl integration
+
+### Manual Setup
+
+Create a `translate-kit.config.ts` at your project root:
+
+```ts
+import { defineConfig } from "translate-kit";
+import { openai } from "@ai-sdk/openai";
+
+export default defineConfig({
+  model: openai("gpt-4o-mini"),
+  sourceLocale: "en",
+  targetLocales: ["es", "fr", "de"],
+  messagesDir: "./messages",
+});
+```
+
+Set your API key as an environment variable:
+
+```bash
+# .env
+OPENAI_API_KEY=sk-...
+```
+
+## Your First Translation
+
+Create your source messages file:
+
+```json
+// messages/en.json
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel"
+  },
+  "auth": {
+    "login": "Log in",
+    "signup": "Sign up"
+  }
+}
+```
+
+Run the translate command:
+
+```bash
+npx translate-kit translate
+```
+
+This generates `messages/es.json`, `messages/fr.json`, and `messages/de.json` with AI-translated content. Only new or modified keys are translated on subsequent runs.

@@ -1,0 +1,102 @@
+---
+title: AI Providers
+description: Using different AI providers with translate-kit.
+---
+
+translate-kit works with any provider supported by the [Vercel AI SDK](https://sdk.vercel.ai/). Install the provider package and pass the model to your config.
+
+## OpenAI
+
+```bash
+npm install @ai-sdk/openai
+```
+
+```ts
+import { openai } from "@ai-sdk/openai";
+
+export default defineConfig({
+  model: openai("gpt-4o-mini"),
+  // ...
+});
+```
+
+Set `OPENAI_API_KEY` in your environment.
+
+## Anthropic
+
+```bash
+npm install @ai-sdk/anthropic
+```
+
+```ts
+import { anthropic } from "@ai-sdk/anthropic";
+
+export default defineConfig({
+  model: anthropic("claude-sonnet-4-20250514"),
+  // ...
+});
+```
+
+Set `ANTHROPIC_API_KEY` in your environment.
+
+## Google
+
+```bash
+npm install @ai-sdk/google
+```
+
+```ts
+import { google } from "@ai-sdk/google";
+
+export default defineConfig({
+  model: google("gemini-2.0-flash"),
+  // ...
+});
+```
+
+Set `GOOGLE_GENERATIVE_AI_API_KEY` in your environment.
+
+## Mistral
+
+```bash
+npm install @ai-sdk/mistral
+```
+
+```ts
+import { mistral } from "@ai-sdk/mistral";
+
+export default defineConfig({
+  model: mistral("mistral-large-latest"),
+  // ...
+});
+```
+
+Set `MISTRAL_API_KEY` in your environment.
+
+## Groq
+
+```bash
+npm install @ai-sdk/groq
+```
+
+```ts
+import { groq } from "@ai-sdk/groq";
+
+export default defineConfig({
+  model: groq("llama-3.3-70b-versatile"),
+  // ...
+});
+```
+
+Set `GROQ_API_KEY` in your environment.
+
+## Choosing a Model
+
+For translation tasks, smaller and faster models tend to work well:
+
+- **OpenAI**: `gpt-4o-mini` is a good default — fast, cheap, and accurate
+- **Anthropic**: `claude-sonnet-4-20250514` balances quality and speed
+- **Google**: `gemini-2.0-flash` is fast and cost-effective
+- **Groq**: `llama-3.3-70b-versatile` offers fast inference on open models
+
+You can always use larger models for higher quality translations at the cost of speed and price.

@@ -1,0 +1,47 @@
+---
+title: init
+description: Interactive setup wizard.
+---
+
+The `init` command runs an interactive wizard to set up translate-kit in your project.
+
+## Usage
+
+```bash
+translate-kit init
+```
+
+## What It Does
+
+The wizard guides you through:
+
+1. **AI provider selection** — choose from OpenAI, Anthropic, Google, Mistral, or Groq
+2. **Model name** — pick a specific model (e.g. `gpt-4o-mini`)
+3. **Source locale** — your source language (default: `en`)
+4. **Target locales** — languages to translate into
+5. **Messages directory** — where translation files live (default: `./messages`)
+6. **Include patterns** — which source files to scan (auto-detected)
+7. **i18n library** — the import source for `useTranslations`
+8. **Project context** — description for better translations
+9. **Tone** — translation style (professional, casual, etc.)
+
+## Generated Files
+
+The wizard creates:
+
+- **`translate-kit.config.ts`** — your configuration file
+
+For next-intl projects, it can also create:
+
+- **`i18n/request.ts`** — locale detection setup
+- Updates to **`next.config.ts`** with `createNextIntlPlugin`
+
+## Full Pipeline
+
+At the end, the wizard offers to run the full pipeline:
+
+```
+scan → codegen → translate
+```
+
+This scans your source code, replaces strings with `t()` calls, and generates translations in one step.
