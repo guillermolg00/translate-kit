@@ -1,5 +1,14 @@
 import _traverse from "@babel/traverse";
-import type { File } from "@babel/types";
+import type { NodePath } from "@babel/traverse";
+import type {
+  File,
+  JSXText,
+  JSXAttribute,
+  JSXExpressionContainer,
+  ObjectProperty,
+  CallExpression,
+  JSXElement,
+} from "@babel/types";
 import {
   isTranslatableProp,
   isIgnoredTag,
@@ -14,7 +23,9 @@ import {
 } from "../utils/ast-helpers.js";
 import type { ExtractedString } from "../types.js";
 
-const traverse = resolveDefault(_traverse) as unknown as typeof _traverse;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type TraverseFn = (ast: File, opts: Record<string, any>) => void;
+const traverse = resolveDefault(_traverse) as unknown as TraverseFn;
 
 export function extractStrings(
   ast: File,
@@ -24,7 +35,7 @@ export function extractStrings(
   const results: ExtractedString[] = [];
 
   traverse(ast, {
-    JSXText(path) {
+    JSXText(path: NodePath<JSXText>) {
       const text = path.node.value.trim();
       if (shouldIgnore(text)) return;
 
@@ -44,7 +55,7 @@ export function extractStrings(
       });
     },
 
-    JSXAttribute(path) {
+    JSXAttribute(path: NodePath<JSXAttribute>) {
       const name = path.node.name;
       const propName =
         name.type === "JSXIdentifier" ? name.name : name.name.name;
@@ -82,7 +93,7 @@ export function extractStrings(
       });
     },
 
-    JSXExpressionContainer(path) {
+    JSXExpressionContainer(path: NodePath<JSXExpressionContainer>) {
       const expr = path.node.expression;
       if (expr.type !== "StringLiteral") return;
 
@@ -105,7 +116,7 @@ export function extractStrings(
       });
     },
 
-    ObjectProperty(path) {
+    ObjectProperty(path: NodePath<ObjectProperty>) {
       if (!isInsideFunction(path)) return;
 
       const keyNode = path.node.key;
@@ -133,7 +144,7 @@ export function extractStrings(
       });
     },
 
-    CallExpression(path) {
+    CallExpression(path: NodePath<CallExpression>) {
       const callee = path.node.callee;
       if (callee.type !== "Identifier" || callee.name !== "t") return;
 
@@ -168,7 +179,7 @@ export function extractStrings(
       });
     },
 
-    JSXElement(path) {
+    JSXElement(path: NodePath<JSXElement>) {
       const opening = path.node.openingElement;
       if (opening.name.type !== "JSXIdentifier" || opening.name.name !== "T")
         return;

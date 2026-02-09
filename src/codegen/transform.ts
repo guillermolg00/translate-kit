@@ -19,6 +19,13 @@ type GenerateFn = (ast: File, opts?: Record<string, any>) => { code: string };
 const traverse = resolveDefault(_traverse) as unknown as TraverseFn;
 const generate = resolveDefault(_generate) as unknown as GenerateFn;
 
+type JSXChild =
+  | t.JSXText
+  | t.JSXExpressionContainer
+  | t.JSXSpreadChild
+  | t.JSXElement
+  | t.JSXFragment;
+
 function findLastImportIndex(ast: File): number {
   let idx = -1;
   for (let i = 0; i < ast.program.body.length; i++) {
@@ -64,7 +71,7 @@ function hasUseTranslationsImport(ast: File, importSource: string): boolean {
 function hasUseTranslationsCall(ast: File): boolean {
   let found = false;
   traverse(ast, {
-    VariableDeclarator(path) {
+    VariableDeclarator(path: NodePath<t.VariableDeclarator>) {
       const init = path.node.init;
       if (
         init?.type === "CallExpression" &&
@@ -94,7 +101,7 @@ export function transform(
   const componentsNeedingT = new Set<string>();
 
   traverse(ast, {
-    JSXText(path) {
+    JSXText(path: NodePath<t.JSXText>) {
       const text = path.node.value.trim();
       if (!text || !(text in textToKey)) return;
 
@@ -106,7 +113,7 @@ export function transform(
         t.callExpression(t.identifier("t"), [t.stringLiteral(key)]),
       );
 
-      const siblings = parent.node.children.filter((child) => {
+      const siblings = parent.node.children.filter((child: JSXChild) => {
         if (child.type === "JSXText") return child.value.trim().length > 0;
         return true;
       });
@@ -134,7 +141,7 @@ export function transform(
       if (compName) componentsNeedingT.add(compName);
     },
 
-    JSXAttribute(path) {
+    JSXAttribute(path: NodePath<t.JSXAttribute>) {
       const value = path.node.value;
       if (!value) return;
 
@@ -170,7 +177,7 @@ export function transform(
       if (compName) componentsNeedingT.add(compName);
     },
 
-    ObjectProperty(path) {
+    ObjectProperty(path: NodePath<t.ObjectProperty>) {
       if (!isInsideFunction(path)) return;
 
       const keyNode = path.node.key;
@@ -222,12 +229,12 @@ export function transform(
 
   if (!hasUseTranslationsCall(ast)) {
     traverse(ast, {
-      FunctionDeclaration(path) {
+      FunctionDeclaration(path: NodePath<t.FunctionDeclaration>) {
         const name = path.node.id?.name;
         if (!name || !componentsNeedingT.has(name)) return;
         injectTDeclaration(path);
       },
-      VariableDeclarator(path) {
+      VariableDeclarator(path: NodePath<t.VariableDeclarator>) {
         if (path.node.id.type !== "Identifier") return;
         const name = path.node.id.name;
         if (!componentsNeedingT.has(name)) return;
@@ -337,7 +344,7 @@ function hasInlineImport(
 function hasInlineHookCall(ast: File, hookName: string): boolean {
   let found = false;
   traverse(ast, {
-    VariableDeclarator(path) {
+    VariableDeclarator(path: NodePath<t.VariableDeclarator>) {
       const init = path.node.init;
       if (
         init?.type === "CallExpression" &&
@@ -388,7 +395,7 @@ function transformInline(
   }
 
   traverse(ast, {
-    JSXText(path) {
+    JSXText(path: NodePath<t.JSXText>) {
       const text = path.node.value.trim();
       if (!text || !(text in textToKey)) return;
 
@@ -415,7 +422,7 @@ function transformInline(
         false,
       );
 
-      const siblings = parent.node.children.filter((child) => {
+      const siblings = parent.node.children.filter((child: JSXChild) => {
         if (child.type === "JSXText") return child.value.trim().length > 0;
         return true;
       });
@@ -440,7 +447,7 @@ function transformInline(
       stringsWrapped++;
     },
 
-    JSXAttribute(path) {
+    JSXAttribute(path: NodePath<t.JSXAttribute>) {
       const value = path.node.value;
       if (!value) return;
 
@@ -479,7 +486,7 @@ function transformInline(
       if (compName) componentsNeedingT.add(compName);
     },
 
-    ObjectProperty(path) {
+    ObjectProperty(path: NodePath<t.ObjectProperty>) {
       if (!isInsideFunction(path)) return;
 
       const keyNode = path.node.key;
@@ -579,14 +586,14 @@ function transformInline(
       : t.callExpression(t.identifier("createT"), []);
 
     traverse(ast, {
-      FunctionDeclaration(path) {
+      FunctionDeclaration(path: NodePath<t.FunctionDeclaration>) {
         const name = path.node.id?.name;
         if (!name || !componentsNeedingT.has(name)) return;
         const body = path.node.body;
         if (body.type !== "BlockStatement") return;
         injectInlineHookIntoBlock(body, hookCall);
       },
-      VariableDeclarator(path) {
+      VariableDeclarator(path: NodePath<t.VariableDeclarator>) {
         if (path.node.id.type !== "Identifier") return;
         const name = path.node.id.name;
         if (!componentsNeedingT.has(name)) return;
