@@ -39,10 +39,10 @@ const configSchema = z
       })
       .optional(),
   })
-  .refine(
-    (data) => data.mode !== "inline" || data.inline != null,
-    { message: "inline options are required when mode is 'inline'", path: ["inline"] },
-  );
+  .refine((data) => data.mode !== "inline" || data.inline != null, {
+    message: "inline options are required when mode is 'inline'",
+    path: ["inline"],
+  });
 
 export function defineConfig(config: TranslateKitConfig) {
   return config as TranslateKitConfig;

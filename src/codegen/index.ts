@@ -45,7 +45,10 @@ export async function codegen(
     try {
       ast = parseFile(code, filePath);
     } catch (err) {
-      logVerbose(`Skipping unparseable file ${filePath}: ${err instanceof Error ? err.message : String(err)}`, true);
+      logVerbose(
+        `Skipping unparseable file ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+        true,
+      );
       continue;
     }
 

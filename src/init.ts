@@ -10,7 +10,12 @@ import { translateAll } from "./translate.js";
 import { writeTranslation, writeLockFile } from "./writer.js";
 import { loadLockFile } from "./diff.js";
 import { unflatten } from "./flatten.js";
-import { CLIENT_TEMPLATE, SERVER_TEMPLATE, generateI18nHelper } from "./templates/t-component.js";
+import {
+  CLIENT_TEMPLATE,
+  SERVER_TEMPLATE,
+  generateI18nHelper,
+} from "./templates/t-component.js";
+import { parseFile } from "./scanner/parser.js";
 
 const AI_PROVIDERS = {
   openai: {
@@ -166,6 +171,32 @@ function generateConfigFile(opts: {
   return lines.join("\n");
 }
 
+function canParse(content: string, filePath: string): boolean {
+  try {
+    parseFile(content, filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function safeWriteModifiedFile(
+  filePath: string,
+  original: string,
+  modified: string,
+  label: string,
+): Promise<boolean> {
+  if (!canParse(modified, filePath)) {
+    p.log.warn(
+      `Could not safely modify ${label}. Please apply changes manually:\n` +
+        `  File: ${filePath}`,
+    );
+    return false;
+  }
+  await writeFile(filePath, modified, "utf-8");
+  return true;
+}
+
 function detectSrcDir(cwd: string): boolean {
   return existsSync(join(cwd, "src", "app"));
 }
@@ -292,8 +323,16 @@ export default getRequestConfig(async () => {
       );
 
       const updated = importLine + "\n" + pluginLine + "\n" + wrapped;
-      await writeFile(nextConfigPath, updated, "utf-8");
-      filesCreated.push("next.config.ts (updated)");
+      if (
+        await safeWriteModifiedFile(
+          nextConfigPath,
+          content,
+          updated,
+          "next.config.ts",
+        )
+      ) {
+        filesCreated.push("next.config.ts (updated)");
+      }
     }
   }
 
@@ -302,6 +341,7 @@ export default getRequestConfig(async () => {
   if (layoutPath) {
     let layoutContent = await readFile(layoutPath, "utf-8");
     if (!layoutContent.includes("NextIntlClientProvider")) {
+      const original = layoutContent;
       const importLines =
         'import { NextIntlClientProvider } from "next-intl";\n' +
         'import { getMessages } from "next-intl/server";\n';
@@ -323,15 +363,20 @@ export default getRequestConfig(async () => {
         "  </NextIntlClientProvider>\n      </body>",
       );
 
-      await writeFile(layoutPath, layoutContent, "utf-8");
-      filesCreated.push(relative(cwd, layoutPath) + " (updated)");
+      if (
+        await safeWriteModifiedFile(
+          layoutPath,
+          original,
+          layoutContent,
+          "root layout",
+        )
+      ) {
+        filesCreated.push(relative(cwd, layoutPath) + " (updated)");
+      }
     }
   }
 
-  await createEmptyMessageFiles(
-    join(cwd, messagesDir),
-    allLocales,
-  );
+  await createEmptyMessageFiles(join(cwd, messagesDir), allLocales);
 
   if (filesCreated.length > 0) {
     p.log.success(`next-intl configured: ${filesCreated.join(", ")}`);
@@ -387,6 +432,7 @@ async function setupInlineI18n(
   if (layoutPath) {
     let layoutContent = await readFile(layoutPath, "utf-8");
     if (!layoutContent.includes("I18nProvider")) {
+      const original = layoutContent;
       const importLines =
         `import { I18nProvider } from "${componentPath}";\n` +
         `import { getLocale, getMessages } from "@/i18n";\n`;
@@ -408,15 +454,23 @@ async function setupInlineI18n(
         "\t</I18nProvider>\n\t\t\t</body>",
       );
 
-      await writeFile(layoutPath, layoutContent, "utf-8");
-      filesCreated.push(relative(cwd, layoutPath) + " (updated)");
+      if (
+        await safeWriteModifiedFile(
+          layoutPath,
+          original,
+          layoutContent,
+          "root layout",
+        )
+      ) {
+        filesCreated.push(relative(cwd, layoutPath) + " (updated)");
+      }
     }
   }
 
-  await createEmptyMessageFiles(
-    join(cwd, messagesDir),
-    [sourceLocale, ...targetLocales],
-  );
+  await createEmptyMessageFiles(join(cwd, messagesDir), [
+    sourceLocale,
+    ...targetLocales,
+  ]);
 
   if (filesCreated.length > 0) {
     p.log.success(`Inline i18n configured: ${filesCreated.join(", ")}`);
@@ -445,8 +499,16 @@ export async function runInitWizard(): Promise<void> {
   const mode = await p.select({
     message: "Translation mode:",
     options: [
-      { value: "keys" as const, label: "Keys mode", hint: "t('key') + JSON files" },
-      { value: "inline" as const, label: "Inline mode", hint: "<T id='key'>text</T>, text stays in code" },
+      {
+        value: "keys" as const,
+        label: "Keys mode",
+        hint: "t('key') + JSON files",
+      },
+      {
+        value: "inline" as const,
+        label: "Inline mode",
+        hint: "<T id='key'>text</T>, text stays in code",
+      },
     ],
   });
   if (p.isCancel(mode)) cancel();
@@ -567,7 +629,13 @@ export async function runInitWizard(): Promise<void> {
 
   if (mode === "inline" && componentPath) {
     await dropInlineComponents(cwd, componentPath);
-    await setupInlineI18n(cwd, componentPath, sourceLocale, targetLocales, messagesDir);
+    await setupInlineI18n(
+      cwd,
+      componentPath,
+      sourceLocale,
+      targetLocales,
+      messagesDir,
+    );
   } else if (i18nImport === "next-intl") {
     await setupNextIntl(cwd, sourceLocale, targetLocales, messagesDir);
   }
@@ -656,7 +724,11 @@ export async function runInitWizard(): Promise<void> {
   } else {
     const sourceFile = join(resolvedMessagesDir, `${sourceLocale}.json`);
     const nested = unflatten(messages);
-    await writeFile(sourceFile, JSON.stringify(nested, null, 2) + "\n", "utf-8");
+    await writeFile(
+      sourceFile,
+      JSON.stringify(nested, null, 2) + "\n",
+      "utf-8",
+    );
     sourceFlat = messages;
   }
 
@@ -687,8 +759,12 @@ export async function runInitWizard(): Promise<void> {
   const reconciledMessages: Record<string, string> = {};
 
   if (mode === "inline") {
-    const tComponents = postScan.strings.filter((s) => s.type === "T-component" && s.id);
-    const inlineTCalls = postScan.strings.filter((s) => s.type === "t-call" && s.id);
+    const tComponents = postScan.strings.filter(
+      (s) => s.type === "T-component" && s.id,
+    );
+    const inlineTCalls = postScan.strings.filter(
+      (s) => s.type === "t-call" && s.id,
+    );
     for (const tc of tComponents) {
       if (tc.id && tc.id in keyToText) {
         reconciledMessages[tc.id] = keyToText[tc.id];

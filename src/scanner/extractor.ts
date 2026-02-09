@@ -143,10 +143,7 @@ export function extractStrings(
       const firstArg = args[0];
       if (firstArg.type !== "StringLiteral") return;
 
-      if (
-        args.length >= 2 &&
-        args[1].type === "StringLiteral"
-      ) {
+      if (args.length >= 2 && args[1].type === "StringLiteral") {
         results.push({
           text: firstArg.value,
           type: "t-call",
@@ -173,7 +170,8 @@ export function extractStrings(
 
     JSXElement(path) {
       const opening = path.node.openingElement;
-      if (opening.name.type !== "JSXIdentifier" || opening.name.name !== "T") return;
+      if (opening.name.type !== "JSXIdentifier" || opening.name.name !== "T")
+        return;
 
       let id: string | undefined;
       for (const attr of opening.attributes) {

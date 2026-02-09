@@ -103,9 +103,11 @@ const translateCommand = defineCommand({
     }
 
     if (Object.keys(sourceFlat).length === 0) {
-      logError(mode === "inline"
-        ? `No keys found in .translate-map.json. Run 'translate-kit scan' first.`
-        : `No keys found in ${join(messagesDir, `${sourceLocale}.json`)}`);
+      logError(
+        mode === "inline"
+          ? `No keys found in .translate-map.json. Run 'translate-kit scan' first.`
+          : `No keys found in ${join(messagesDir, `${sourceLocale}.json`)}`,
+      );
       process.exit(1);
     }
 
@@ -173,7 +175,9 @@ const translateCommand = defineCommand({
         ...translated,
       };
 
-      await writeTranslation(targetFile, finalFlat, { flat: mode === "inline" });
+      await writeTranslation(targetFile, finalFlat, {
+        flat: mode === "inline",
+      });
 
       const allTranslatedKeys = Object.keys(finalFlat);
       const currentLock = await loadLockFile(messagesDir);
@@ -243,7 +247,9 @@ const scanCommand = defineCommand({
         );
       }
       if (mode === "inline") {
-        logInfo("\n  Inline mode: no source locale JSON will be created. Source text remains in code.");
+        logInfo(
+          "\n  Inline mode: no source locale JSON will be created. Source text remains in code.",
+        );
       }
       return;
     }
@@ -285,14 +291,19 @@ const scanCommand = defineCommand({
     );
 
     if (mode === "inline") {
-      logInfo("Inline mode: source text stays in code, no source locale JSON created.");
+      logInfo(
+        "Inline mode: source text stays in code, no source locale JSON created.",
+      );
     } else {
       const messages: Record<string, string> = {};
       for (const [text, key] of Object.entries(textToKey)) {
         messages[key] = text;
       }
 
-      const sourceFile = join(config.messagesDir, `${config.sourceLocale}.json`);
+      const sourceFile = join(
+        config.messagesDir,
+        `${config.sourceLocale}.json`,
+      );
       await mkdir(config.messagesDir, { recursive: true });
       const nested = unflatten(messages);
       const content = JSON.stringify(nested, null, 2) + "\n";
@@ -394,7 +405,13 @@ const main = defineCommand({
   async run({ rawArgs }) {
     if (rawArgs.length === 0 || rawArgs[0]?.startsWith("-")) {
       await translateCommand.run!({
-        args: { _: rawArgs, "dry-run": false, force: false, verbose: false, locale: "" },
+        args: {
+          _: rawArgs,
+          "dry-run": false,
+          force: false,
+          verbose: false,
+          locale: "",
+        },
         rawArgs,
         cmd: translateCommand,
       });

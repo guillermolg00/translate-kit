@@ -74,7 +74,10 @@ export function getParentTagName(path: NodePath<Node>): string | undefined {
       if (opening.name.type === "JSXIdentifier") {
         return opening.name.name;
       }
-      if (opening.name.type === "JSXMemberExpression" && opening.name.object.type === "JSXIdentifier") {
+      if (
+        opening.name.type === "JSXMemberExpression" &&
+        opening.name.object.type === "JSXIdentifier"
+      ) {
         return `${opening.name.object.name}.${opening.name.property.name}`;
       }
     }

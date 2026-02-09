@@ -4,7 +4,12 @@ import * as t from "@babel/types";
 import type { File } from "@babel/types";
 import type { NodePath } from "@babel/traverse";
 import { isContentProperty } from "../scanner/filters.js";
-import { resolveDefault, isInsideFunction, getComponentName } from "../utils/ast-helpers.js";
+import {
+  resolveDefault,
+  isInsideFunction,
+  getComponentName,
+} from "../utils/ast-helpers.js";
+import { logWarning } from "../logger.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type TraverseFn = (ast: File, opts: Record<string, any>) => void;
@@ -169,8 +174,10 @@ export function transform(
       if (!isInsideFunction(path)) return;
 
       const keyNode = path.node.key;
-      if (keyNode.type !== "Identifier" && keyNode.type !== "StringLiteral") return;
-      const propName = keyNode.type === "Identifier" ? keyNode.name : keyNode.value;
+      if (keyNode.type !== "Identifier" && keyNode.type !== "StringLiteral")
+        return;
+      const propName =
+        keyNode.type === "Identifier" ? keyNode.name : keyNode.value;
       if (!isContentProperty(propName)) return;
 
       const valueNode = path.node.value;
@@ -298,17 +305,29 @@ function isClientFile(ast: File): boolean {
   return false;
 }
 
-function hasInlineImport(ast: File, componentPath: string): { hasT: boolean; hasHook: boolean } {
+function hasInlineImport(
+  ast: File,
+  componentPath: string,
+): { hasT: boolean; hasHook: boolean } {
   let hasT = false;
   let hasHook = false;
   for (const node of ast.program.body) {
     if (node.type !== "ImportDeclaration") continue;
     const src = node.source.value;
-    if (src !== componentPath && src !== `${componentPath}-server` && src !== `${componentPath}/t-server`) continue;
+    if (
+      src !== componentPath &&
+      src !== `${componentPath}-server` &&
+      src !== `${componentPath}/t-server`
+    )
+      continue;
     for (const spec of node.specifiers) {
-      if (spec.type === "ImportSpecifier" && spec.imported.type === "Identifier") {
+      if (
+        spec.type === "ImportSpecifier" &&
+        spec.imported.type === "Identifier"
+      ) {
         if (spec.imported.name === "T") hasT = true;
-        if (spec.imported.name === "useT" || spec.imported.name === "createT") hasHook = true;
+        if (spec.imported.name === "useT" || spec.imported.name === "createT")
+          hasHook = true;
       }
     }
   }
@@ -357,6 +376,9 @@ function transformInline(
         ) {
           const argName = (path.node.arguments[0] as t.Identifier).name;
           if (!path.scope.hasBinding(argName)) {
+            logWarning(
+              `Repaired createT(${argName}) → createT() — "${argName}" was not in scope`,
+            );
             path.node.arguments = [];
             repaired = true;
           }
@@ -461,8 +483,10 @@ function transformInline(
       if (!isInsideFunction(path)) return;
 
       const keyNode = path.node.key;
-      if (keyNode.type !== "Identifier" && keyNode.type !== "StringLiteral") return;
-      const propName = keyNode.type === "Identifier" ? keyNode.name : keyNode.value;
+      if (keyNode.type !== "Identifier" && keyNode.type !== "StringLiteral")
+        return;
+      const propName =
+        keyNode.type === "Identifier" ? keyNode.name : keyNode.value;
       if (!isContentProperty(propName)) return;
 
       const valueNode = path.node.value;
@@ -502,7 +526,9 @@ function transformInline(
     specifiers.push(t.importSpecifier(t.identifier("T"), t.identifier("T")));
   }
   if (needsHook && !existing.hasHook) {
-    specifiers.push(t.importSpecifier(t.identifier(hookName), t.identifier(hookName)));
+    specifiers.push(
+      t.importSpecifier(t.identifier(hookName), t.identifier(hookName)),
+    );
   }
 
   if (specifiers.length > 0) {
@@ -510,7 +536,8 @@ function transformInline(
     for (const node of ast.program.body) {
       if (
         node.type === "ImportDeclaration" &&
-        (node.source.value === importPath || node.source.value === componentPath)
+        (node.source.value === importPath ||
+          node.source.value === componentPath)
       ) {
         node.specifiers.push(...specifiers);
         node.source.value = importPath;
@@ -520,7 +547,10 @@ function transformInline(
     }
 
     if (!appended) {
-      const importDecl = t.importDeclaration(specifiers, t.stringLiteral(importPath));
+      const importDecl = t.importDeclaration(
+        specifiers,
+        t.stringLiteral(importPath),
+      );
       const lastImportIndex = findLastImportIndex(ast);
 
       if (lastImportIndex >= 0) {
@@ -529,8 +559,12 @@ function transformInline(
         let insertIdx = 0;
         if (
           ast.program.body[0]?.type === "ExpressionStatement" &&
-          (ast.program.body[0] as t.ExpressionStatement).expression.type === "StringLiteral" &&
-          ((ast.program.body[0] as t.ExpressionStatement).expression as t.StringLiteral).value === "use client"
+          (ast.program.body[0] as t.ExpressionStatement).expression.type ===
+            "StringLiteral" &&
+          (
+            (ast.program.body[0] as t.ExpressionStatement)
+              .expression as t.StringLiteral
+          ).value === "use client"
         ) {
           insertIdx = 1;
         }
@@ -577,7 +611,10 @@ function transformInline(
   return { code: output.code, stringsWrapped, modified: true };
 }
 
-function injectInlineHookIntoBlock(block: t.BlockStatement, hookCall: t.CallExpression): void {
+function injectInlineHookIntoBlock(
+  block: t.BlockStatement,
+  hookCall: t.CallExpression,
+): void {
   for (const stmt of block.body) {
     if (
       stmt.type === "VariableDeclaration" &&
@@ -600,4 +637,3 @@ function injectInlineHookIntoBlock(block: t.BlockStatement, hookCall: t.CallExpr
 
   block.body.unshift(tDecl);
 }
-
