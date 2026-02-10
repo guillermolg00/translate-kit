@@ -235,8 +235,8 @@ describe("codegen transform (inline mode)", () => {
   };
 
   it("wraps JSX text with <T> components", () => {
-    const code = readFileSync(join(fixturesDir, "before-inline.tsx"), "utf-8");
-    const ast = parseFile(code, "before-inline.tsx");
+    const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
+    const ast = parseFile(code, "before.tsx");
     const result = transform(ast, textToKey, inlineOpts);
 
     expect(result.modified).toBe(true);
@@ -247,8 +247,8 @@ describe("codegen transform (inline mode)", () => {
   });
 
   it("wraps attributes with t(text, key) in inline mode", () => {
-    const code = readFileSync(join(fixturesDir, "before-inline.tsx"), "utf-8");
-    const ast = parseFile(code, "before-inline.tsx");
+    const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
+    const ast = parseFile(code, "before.tsx");
     const result = transform(ast, textToKey, inlineOpts);
 
     expect(result.code).toContain('t("Search...", "common.searchPlaceholder")');
@@ -263,8 +263,8 @@ describe("codegen transform (inline mode)", () => {
   });
 
   it("injects T and createT import for server files", () => {
-    const code = readFileSync(join(fixturesDir, "before-inline.tsx"), "utf-8");
-    const ast = parseFile(code, "before-inline.tsx");
+    const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
+    const ast = parseFile(code, "before.tsx");
     const result = transform(ast, textToKey, inlineOpts);
 
     // Server file (no "use client" directive)
@@ -673,8 +673,8 @@ describe("AST validation post-codegen", () => {
   });
 
   it("valid inline transformed code can be re-parsed", () => {
-    const code = readFileSync(join(fixturesDir, "before-inline.tsx"), "utf-8");
-    const ast = parseFile(code, "before-inline.tsx");
+    const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
+    const ast = parseFile(code, "before.tsx");
     const inlineOpts: TransformOptions = {
       mode: "inline",
       componentPath: "@/components/t",
@@ -682,14 +682,14 @@ describe("AST validation post-codegen", () => {
     const result = transform(ast, textToKey, inlineOpts);
 
     expect(result.modified).toBe(true);
-    expect(() => parseFile(result.code, "before-inline.tsx")).not.toThrow();
+    expect(() => parseFile(result.code, "before.tsx")).not.toThrow();
   });
 
   it("all fixture transforms produce parseable output", () => {
     const fixtures = [
       { file: "before.tsx", opts: undefined },
       {
-        file: "before-inline.tsx",
+        file: "before.tsx",
         opts: { mode: "inline" as const, componentPath: "@/components/t" },
       },
     ];

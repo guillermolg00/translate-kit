@@ -1,5 +1,8 @@
-import { describe, it, expect } from "vitest";
-import { computeDiff, hashValue } from "../src/diff.js";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { computeDiff, hashValue, loadJsonFile, loadLockFile } from "../src/diff.js";
 
 describe("hashValue", () => {
   it("returns a 16-char hex string", () => {
@@ -84,5 +87,76 @@ describe("computeDiff", () => {
     expect(result.added).toEqual({ "app.title": "Hello", "app.sub": "World" });
     expect(result.modified).toEqual({});
     expect(result.removed).toEqual([]);
+  });
+});
+
+describe("loadJsonFile", () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "diff-test-"));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("returns parsed JSON from existing file", async () => {
+    const filePath = join(tempDir, "data.json");
+    await writeFile(filePath, JSON.stringify({ key: "value" }), "utf-8");
+
+    const result = await loadJsonFile(filePath);
+    expect(result).toEqual({ key: "value" });
+  });
+
+  it("returns {} if file does not exist", async () => {
+    const result = await loadJsonFile(join(tempDir, "missing.json"));
+    expect(result).toEqual({});
+  });
+
+  it("throws on invalid JSON", async () => {
+    const filePath = join(tempDir, "bad.json");
+    await writeFile(filePath, "not json{", "utf-8");
+
+    await expect(loadJsonFile(filePath)).rejects.toThrow("Failed to load");
+  });
+});
+
+describe("loadLockFile", () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "diff-lock-test-"));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("returns lock data from existing file", async () => {
+    const lockData = { "app.title": "abc123" };
+    await writeFile(
+      join(tempDir, ".translate-lock.json"),
+      JSON.stringify(lockData),
+      "utf-8",
+    );
+
+    const result = await loadLockFile(tempDir);
+    expect(result).toEqual(lockData);
+  });
+
+  it("returns {} if lock file does not exist", async () => {
+    const result = await loadLockFile(tempDir);
+    expect(result).toEqual({});
+  });
+
+  it("throws on invalid JSON in lock file", async () => {
+    await writeFile(
+      join(tempDir, ".translate-lock.json"),
+      "{broken",
+      "utf-8",
+    );
+
+    await expect(loadLockFile(tempDir)).rejects.toThrow("Failed to load lock file");
   });
 });
