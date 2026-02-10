@@ -43,33 +43,18 @@ const steps: Step[] = [
     number: "02",
     title: "Configure",
     description:
-      "The interactive wizard sets up everything. Pick your AI provider, mode, languages, and optionally runs the full pipeline.",
+      "The interactive wizard sets up everything. Pick your AI provider, mode, and languages in seconds.",
     lines: [
       { text: "bunx translate-kit init", type: "command" },
       { text: "", type: "blank" },
       { text: "\u250c  translate-kit setup", type: "info" },
       { text: "\u2502", type: "dim" },
-      { text: "\u25c7  Translation mode: Inline mode", type: "result" },
-      { text: "\u25c7  AI provider: OpenAI", type: "result" },
-      { text: "\u25c7  Model: gpt-4o-mini", type: "result" },
-      { text: "\u25c7  Source locale: en", type: "result" },
-      { text: "\u25c7  Target locales: Spanish (es)", type: "result" },
-      { text: "\u25c7  Messages directory: ./messages", type: "result" },
+      { text: "\u25c7  Mode: Inline \u00b7 Provider: OpenAI (gpt-4o-mini)", type: "result" },
+      { text: "\u25c7  Source: en \u00b7 Target: es, fr, de", type: "result" },
       { text: "\u25c7  Component path: @/components/t", type: "result" },
-      { text: "\u25c7  Tone: Formal", type: "result" },
       { text: "\u2502", type: "dim" },
-      { text: "\u25c6  Created translate-kit.config.ts", type: "success" },
-      { text: "\u25c6  Created inline components", type: "success" },
+      { text: "\u25c6  Created config + components", type: "success" },
       { text: "\u25c6  Configured i18n + layout", type: "success" },
-      { text: "\u2502", type: "dim" },
-      { text: "\u25c7  Run full pipeline? Yes", type: "result" },
-      { text: "", type: "blank" },
-      { text: "\u25c7  Scanning... 876 strings from 412 files", type: "dim" },
-      { text: "\u25c7  Generating keys... done", type: "dim" },
-      { text: "\u25c7  Codegen... 763 strings wrapped in 217 files", type: "dim" },
-      { text: "\u25c7  Translating es... done", type: "dim" },
-      { text: "\u2502", type: "dim" },
-      { text: "\u25cf  62,934 in + 15,649 out = 78,583 tokens \u00b7 ~$0.02", type: "info" },
       { text: "\u2502", type: "dim" },
       { text: "\u2514  You're all set!", type: "success" },
     ],
@@ -164,8 +149,8 @@ function Line({ line }: { line: TLine }) {
 
 function TerminalChrome({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-xl border border-neutral-700 bg-neutral-900/40 shadow-2xl overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-3 bg-neutral-800/50  border-b border-neutral-700">
+    <div className="rounded-xl border border-neutral-700 bg-neutral-900/40 shadow-2xl">
+      <div className="flex items-center gap-2 px-4 py-3 bg-neutral-800/50 border-b border-neutral-700">
         <div className="h-3 w-3 rounded-full bg-[#ff5f57]" />
         <div className="h-3 w-3 rounded-full bg-[#febc2e]" />
         <div className="h-3 w-3 rounded-full bg-[#28c840]" />
@@ -181,7 +166,7 @@ function TerminalChrome({ children }: { children: ReactNode }) {
 function AnimatedTerminal({ activeStep }: { activeStep: number }) {
   return (
     <TerminalChrome>
-      <div className="relative h-[340px]">
+      <div className="relative h-[280px]">
         {steps.map((step, i) => (
           <div
             key={step.id}
