@@ -46,7 +46,7 @@ export async function scan(
         } catch (err) {
           logVerbose(
             `Skipping unparseable file ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
-            true,
+            false,
           );
           completed++;
           callbacks?.onProgress?.(completed, files.length);
