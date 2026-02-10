@@ -12,3 +12,4 @@ website/.next
 website/node_modules
 website/.source
 .vercel
+.internal

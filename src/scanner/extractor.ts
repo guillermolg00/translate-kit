@@ -117,7 +117,7 @@ export function extractStrings(
     },
 
     ObjectProperty(path: NodePath<ObjectProperty>) {
-      if (!isInsideFunction(path)) return;
+      const moduleLevel = !isInsideFunction(path);
 
       const keyNode = path.node.key;
       if (keyNode.type !== "Identifier" && keyNode.type !== "StringLiteral")
@@ -141,6 +141,7 @@ export function extractStrings(
         column: valueNode.loc?.start.column ?? 0,
         componentName: getComponentName(path),
         propName,
+        ...(moduleLevel ? { moduleLevel: true } : {}),
       });
     },
 

@@ -21,7 +21,11 @@ import {
   logSuccess,
   logVerbose,
   logWarning,
+  logUsage,
+  logProgress,
+  logProgressClear,
 } from "./logger.js";
+import { createUsageTracker, estimateCost, formatUsage, formatCost } from "./usage.js";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import type { TranslationResult } from "./types.js";
 
@@ -114,6 +118,7 @@ const translateCommand = defineCommand({
     logStart(sourceLocale, locales);
 
     const results: TranslationResult[] = [];
+    const usageTracker = createUsageTracker();
 
     for (const locale of locales) {
       const start = Date.now();
@@ -161,8 +166,12 @@ const translateCommand = defineCommand({
                 verbose,
               );
             },
+            onProgress: (c, t) => logProgress(c, t, `Translating ${locale}...`),
+            onUsage: (usage) => usageTracker.add(usage),
           });
+          logProgressClear();
         } catch (err) {
+          logProgressClear();
           errors = Object.keys(toTranslate).length;
           logError(
             `Translation failed for ${locale}: ${err instanceof Error ? err.message : String(err)}`,
@@ -203,6 +212,11 @@ const translateCommand = defineCommand({
 
     if (!args["dry-run"]) {
       logSummary(results);
+      const usage = usageTracker.get();
+      if (usage.totalTokens > 0) {
+        const cost = await estimateCost(model, usage);
+        logUsage(formatUsage(usage), cost ? formatCost(cost.totalUSD) : undefined);
+      }
     }
   },
 });
@@ -230,7 +244,10 @@ const scanCommand = defineCommand({
       process.exit(1);
     }
 
-    const result = await scan(config.scan);
+    const result = await scan(config.scan, process.cwd(), {
+      onProgress: (c, t) => logProgress(c, t, "Scanning..."),
+    });
+    logProgressClear();
 
     const bareStrings = result.strings.filter((s) => {
       if (s.type === "t-call") return false;
@@ -241,9 +258,25 @@ const scanCommand = defineCommand({
     logScanResult(bareStrings.length, result.fileCount);
 
     if (args["dry-run"]) {
-      for (const str of bareStrings) {
+      const functionLevel = bareStrings.filter((s) => !s.moduleLevel);
+      const moduleLevelStrings = bareStrings.filter((s) => s.moduleLevel);
+
+      for (const str of functionLevel) {
         logInfo(
           `"${str.text}" (${str.componentName ?? "unknown"}, ${str.file})`,
+        );
+      }
+      if (moduleLevelStrings.length > 0) {
+        logWarning(
+          `\n  ${moduleLevelStrings.length} module-level string(s) found (cannot be auto-transformed by codegen):`,
+        );
+        for (const str of moduleLevelStrings) {
+          logInfo(
+            `  "${str.text}" (${str.propName ?? "unknown"}, ${str.file}:${str.line})`,
+          );
+        }
+        logInfo(
+          "  Tip: move these into a helper like getItems(t) so t() is available at call site.",
         );
       }
       if (mode === "inline") {
@@ -276,6 +309,7 @@ const scanCommand = defineCommand({
     }
 
     logInfo("Generating semantic keys...");
+    const scanUsageTracker = createUsageTracker();
     const textToKey = await generateSemanticKeys({
       model: config.model,
       strings: bareStrings,
@@ -283,12 +317,30 @@ const scanCommand = defineCommand({
       batchSize: config.translation?.batchSize ?? 50,
       concurrency: config.translation?.concurrency ?? 3,
       retries: config.translation?.retries ?? 2,
+      onProgress: (c, t) => logProgress(c, t, "Generating keys..."),
+      onUsage: (usage) => scanUsageTracker.add(usage),
     });
+    logProgressClear();
 
     await writeMapFile(config.messagesDir, textToKey);
     logSuccess(
       `Written .translate-map.json (${Object.keys(textToKey).length} keys)`,
     );
+
+    const moduleLevelStrings = bareStrings.filter((s) => s.moduleLevel);
+    if (moduleLevelStrings.length > 0) {
+      logWarning(
+        `${moduleLevelStrings.length} module-level string(s) need manual resolution (codegen cannot auto-transform them):`,
+      );
+      for (const str of moduleLevelStrings) {
+        logInfo(
+          `  "${str.text}" (${str.propName ?? "unknown"}, ${str.file}:${str.line})`,
+        );
+      }
+      logInfo(
+        "  Tip: move these into a helper like getItems(t) so t() is available at call site.",
+      );
+    }
 
     if (mode === "inline") {
       logInfo(
@@ -310,6 +362,12 @@ const scanCommand = defineCommand({
       await writeFile(sourceFile, content, "utf-8");
 
       logSuccess(`Written to ${sourceFile}`);
+    }
+
+    const scanUsage = scanUsageTracker.get();
+    if (scanUsage.totalTokens > 0) {
+      const cost = await estimateCost(config.model, scanUsage);
+      logUsage(formatUsage(scanUsage), cost ? formatCost(cost.totalUSD) : undefined);
     }
   },
 });
@@ -370,7 +428,9 @@ const codegenCommand = defineCommand({
       i18nImport: config.scan.i18nImport,
       mode,
       componentPath: config.inline?.componentPath,
+      onProgress: (c, t) => logProgress(c, t, "Processing files..."),
     });
+    logProgressClear();
 
     logSuccess(
       `Codegen complete: ${result.stringsWrapped} strings wrapped in ${result.filesModified} files (${result.filesProcessed} files processed)`,

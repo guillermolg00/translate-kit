@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { glob } from "tinyglobby";
+import pLimit from "p-limit";
 import { parseFile } from "../scanner/parser.js";
 import { transform, type TransformOptions } from "./transform.js";
 import { logVerbose, logWarning } from "../logger.js";
@@ -11,6 +12,7 @@ export interface CodegenOptions {
   i18nImport?: string;
   mode?: "keys" | "inline";
   componentPath?: string;
+  onProgress?: (completed: number, total: number) => void;
 }
 
 export interface CodegenResult {
@@ -30,47 +32,70 @@ export async function codegen(
     absolute: true,
   });
 
-  let filesModified = 0;
-  let stringsWrapped = 0;
-  let filesSkipped = 0;
-
   const transformOpts: TransformOptions = {
     i18nImport: options.i18nImport,
     mode: options.mode,
     componentPath: options.componentPath,
   };
 
-  for (const filePath of files) {
-    const code = await readFile(filePath, "utf-8");
+  const limit = pLimit(10);
+  let completed = 0;
 
-    let ast;
-    try {
-      ast = parseFile(code, filePath);
-    } catch (err) {
-      logVerbose(
-        `Skipping unparseable file ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
-        true,
-      );
-      continue;
-    }
+  const fileResults = await Promise.all(
+    files.map((filePath) =>
+      limit(async () => {
+        const code = await readFile(filePath, "utf-8");
 
-    const result = transform(ast, options.textToKey, transformOpts);
+        let ast;
+        try {
+          ast = parseFile(code, filePath);
+        } catch (err) {
+          logVerbose(
+            `Skipping unparseable file ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+            true,
+          );
+          completed++;
+          options.onProgress?.(completed, files.length);
+          return { modified: false, wrapped: 0, skipped: false };
+        }
 
-    if (result.modified) {
-      try {
-        parseFile(result.code, filePath);
-      } catch {
-        logWarning(
-          `Codegen produced invalid syntax for ${filePath}, file was NOT modified.`,
-        );
-        filesSkipped++;
-        continue;
-      }
+        const result = transform(ast, options.textToKey, transformOpts);
 
-      await writeFile(filePath, result.code, "utf-8");
+        if (result.modified) {
+          try {
+            parseFile(result.code, filePath);
+          } catch {
+            logWarning(
+              `Codegen produced invalid syntax for ${filePath}, file was NOT modified.`,
+            );
+            completed++;
+            options.onProgress?.(completed, files.length);
+            return { modified: false, wrapped: 0, skipped: true };
+          }
+
+          await writeFile(filePath, result.code, "utf-8");
+          completed++;
+          options.onProgress?.(completed, files.length);
+          return { modified: true, wrapped: result.stringsWrapped, skipped: false };
+        }
+
+        completed++;
+        options.onProgress?.(completed, files.length);
+        return { modified: false, wrapped: 0, skipped: false };
+      }),
+    ),
+  );
+
+  let filesModified = 0;
+  let stringsWrapped = 0;
+  let filesSkipped = 0;
+
+  for (const r of fileResults) {
+    if (r.modified) {
       filesModified++;
-      stringsWrapped += result.stringsWrapped;
+      stringsWrapped += r.wrapped;
     }
+    if (r.skipped) filesSkipped++;
   }
 
   return {

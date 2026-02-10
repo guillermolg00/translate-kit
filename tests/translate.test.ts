@@ -10,7 +10,7 @@ vi.mock("ai", () => ({
     for (const key of keys) {
       object[key] = `translated_${key}`;
     }
-    return { object };
+    return { object, usage: { inputTokens: 100, outputTokens: 50 } };
   }),
 }));
 
@@ -227,5 +227,68 @@ describe("placeholder validation", () => {
 
     expect(result.greeting).toBe("Hola mundo");
     expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("onUsage callback", () => {
+  beforeEach(() => {
+    mockGenerateObject.mockReset();
+    mockGenerateObject.mockImplementation(async ({ schema }: any) => {
+      const keys = Object.keys(schema.shape);
+      const object: Record<string, string> = {};
+      for (const key of keys) {
+        object[key] = `translated_${key}`;
+      }
+      return { object, usage: { inputTokens: 100, outputTokens: 50 } };
+    });
+  });
+
+  it("calls onUsage with accumulated token counts", async () => {
+    const onUsage = vi.fn();
+
+    await translateAll({
+      model: mockModel,
+      entries: { a: "1", b: "2", c: "3" },
+      sourceLocale: "en",
+      targetLocale: "es",
+      options: { batchSize: 2 },
+      onUsage,
+    });
+
+    expect(onUsage).toHaveBeenCalledTimes(1);
+    const usage = onUsage.mock.calls[0][0];
+    expect(usage.inputTokens).toBeGreaterThan(0);
+    expect(usage.outputTokens).toBeGreaterThan(0);
+  });
+});
+
+describe("onProgress callback", () => {
+  beforeEach(() => {
+    mockGenerateObject.mockReset();
+    mockGenerateObject.mockImplementation(async ({ schema }: any) => {
+      const keys = Object.keys(schema.shape);
+      const object: Record<string, string> = {};
+      for (const key of keys) {
+        object[key] = `translated_${key}`;
+      }
+      return { object, usage: { inputTokens: 100, outputTokens: 50 } };
+    });
+  });
+
+  it("calls onProgress with increasing values", async () => {
+    const progress: [number, number][] = [];
+
+    await translateAll({
+      model: mockModel,
+      entries: { a: "1", b: "2", c: "3" },
+      sourceLocale: "en",
+      targetLocale: "es",
+      options: { batchSize: 2, concurrency: 1 },
+      onProgress: (c, t) => progress.push([c, t]),
+    });
+
+    expect(progress.length).toBe(2); // 2 batches
+    expect(progress[progress.length - 1][0]).toBe(3); // all 3 keys completed
+    expect(progress[0][1]).toBe(3); // total is always 3
   });
 });

@@ -81,3 +81,21 @@ export function logVerbose(message: string, verbose: boolean): void {
     console.log(pc.dim(`  ${message}`));
   }
 }
+
+export function logUsage(tokens: string, cost?: string): void {
+  console.log(`\n  ${pc.dim("Tokens:")} ${tokens}`);
+  if (cost) console.log(`  ${pc.dim("Est. cost:")} ${cost}`);
+}
+
+export function logProgress(current: number, total: number, label: string): void {
+  if (!process.stdout.isTTY) return;
+  const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+  process.stdout.write(
+    `\r  ${pc.dim(label)} ${pc.bold(`${current}`)}${pc.dim(`/${total}`)} ${pc.dim(`(${pct}%)`)}`,
+  );
+}
+
+export function logProgressClear(): void {
+  if (!process.stdout.isTTY) return;
+  process.stdout.write("\r" + " ".repeat(60) + "\r");
+}

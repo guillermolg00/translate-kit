@@ -10,6 +10,8 @@ interface KeyGenInput {
   batchSize?: number;
   concurrency?: number;
   retries?: number;
+  onProgress?: (completed: number, total: number) => void;
+  onUsage?: (usage: { inputTokens: number; outputTokens: number }) => void;
 }
 
 function buildPrompt(strings: ExtractedString[]): string {
@@ -38,17 +40,27 @@ function buildPrompt(strings: ExtractedString[]): string {
     if (str.parentTag) parts.push(`tag: ${str.parentTag}`);
     if (str.propName) parts.push(`prop: ${str.propName}`);
     if (str.file) parts.push(`file: ${str.file}`);
+    if (str.routePath) parts.push(`route: ${str.routePath}`);
+    if (str.sectionHeading) parts.push(`section: "${str.sectionHeading}"`);
+    if (str.siblingTexts?.length) {
+      parts.push(`siblings: [${str.siblingTexts.slice(0, 3).map((t) => `"${t}"`).join(", ")}]`);
+    }
     lines.push(`  ${parts.join(", ")}`);
   }
 
   return lines.join("\n");
 }
 
+interface KeyBatchResult {
+  keys: Record<string, string>;
+  usage: { inputTokens: number; outputTokens: number };
+}
+
 async function generateKeysBatchWithRetry(
   model: LanguageModel,
   strings: ExtractedString[],
   retries: number,
-): Promise<Record<string, string>> {
+): Promise<KeyBatchResult> {
   const prompt = buildPrompt(strings);
   const texts = strings.map((s) => s.text);
 
@@ -62,14 +74,18 @@ async function generateKeysBatchWithRetry(
   });
 
   let lastError: Error | undefined;
+  let totalUsage = { inputTokens: 0, outputTokens: 0 };
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const { object } = await generateObject({
+      const { object, usage } = await generateObject({
         model,
         prompt,
         schema,
       });
+
+      totalUsage.inputTokens += usage.inputTokens ?? 0;
+      totalUsage.outputTokens += usage.outputTokens ?? 0;
 
       const result: Record<string, string> = {};
       for (const mapping of object.mappings) {
@@ -77,7 +93,7 @@ async function generateKeysBatchWithRetry(
           result[texts[mapping.index]] = mapping.key;
         }
       }
-      return result;
+      return { keys: result, usage: totalUsage };
     } catch (error) {
       lastError = error as Error;
       if (attempt < retries) {
@@ -121,6 +137,8 @@ export async function generateSemanticKeys(
     batchSize = 50,
     concurrency = 3,
     retries = 2,
+    onProgress,
+    onUsage,
   } = input;
 
   const newStrings = strings.filter((s) => !(s.text in existingMap));
@@ -142,15 +160,26 @@ export async function generateSemanticKeys(
   }
 
   const allNewKeys: Record<string, string> = {};
+  let completedStrings = 0;
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
 
   await Promise.all(
     batches.map((batch) =>
       limit(async () => {
-        const keys = await generateKeysBatchWithRetry(model, batch, retries);
+        const { keys, usage } = await generateKeysBatchWithRetry(model, batch, retries);
         Object.assign(allNewKeys, keys);
+        totalInputTokens += usage.inputTokens;
+        totalOutputTokens += usage.outputTokens;
+        completedStrings += batch.length;
+        onProgress?.(completedStrings, uniqueStrings.length);
       }),
     ),
   );
+
+  if (totalInputTokens > 0 || totalOutputTokens > 0) {
+    onUsage?.({ inputTokens: totalInputTokens, outputTokens: totalOutputTokens });
+  }
 
   const resolved = resolveCollisions(allNewKeys, existingMap);
 

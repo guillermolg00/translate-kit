@@ -1,6 +1,6 @@
 import * as p from "@clack/prompts";
 import { existsSync } from "node:fs";
-import { join, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { loadTranslateKitConfig } from "./config.js";
 import { scan } from "./scanner/index.js";
@@ -12,10 +12,11 @@ import { loadLockFile } from "./diff.js";
 import { unflatten } from "./flatten.js";
 import {
   CLIENT_TEMPLATE,
-  SERVER_TEMPLATE,
+  serverTemplate,
   generateI18nHelper,
 } from "./templates/t-component.js";
 import { parseFile } from "./scanner/parser.js";
+import { createUsageTracker, estimateCost, formatUsage, formatCost } from "./usage.js";
 
 const AI_PROVIDERS = {
   openai: {
@@ -393,9 +394,10 @@ async function dropInlineComponents(
 
   const clientFile = `${fsPath}.tsx`;
   const serverFile = `${fsPath}-server.tsx`;
+  const clientBasename = basename(fsPath);
 
   await writeFile(clientFile, CLIENT_TEMPLATE, "utf-8");
-  await writeFile(serverFile, SERVER_TEMPLATE, "utf-8");
+  await writeFile(serverFile, serverTemplate(clientBasename), "utf-8");
 
   const relClient = relative(cwd, clientFile);
   const relServer = relative(cwd, serverFile);
@@ -435,6 +437,7 @@ async function setupInlineI18n(
       const original = layoutContent;
       const importLines =
         `import { I18nProvider } from "${componentPath}";\n` +
+        `import { setServerMessages } from "${componentPath}-server";\n` +
         `import { getLocale, getMessages } from "@/i18n";\n`;
 
       layoutContent = insertImportsAfterLast(layoutContent, importLines);
@@ -442,7 +445,7 @@ async function setupInlineI18n(
 
       layoutContent = layoutContent.replace(
         /return\s*\(/,
-        "const locale = await getLocale();\n\tconst messages = await getMessages(locale);\n\n\treturn (",
+        "const locale = await getLocale();\n\tconst messages = await getMessages(locale);\n\tsetServerMessages(messages);\n\n\treturn (",
       );
 
       layoutContent = layoutContent.replace(
@@ -661,6 +664,7 @@ export async function runInitWizard(): Promise<void> {
   }
 
   const { model } = config;
+  const usageTracker = createUsageTracker();
 
   const scanOptions = {
     include: includePatterns,
@@ -670,7 +674,9 @@ export async function runInitWizard(): Promise<void> {
 
   const s1 = p.spinner();
   s1.start("Scanning...");
-  const scanResult = await scan(scanOptions, cwd);
+  const scanResult = await scan(scanOptions, cwd, {
+    onProgress: (c, t) => { s1.message(`Scanning... ${c}/${t} files`); },
+  });
   const transformableStrings = scanResult.strings.filter(
     (s) =>
       s.type === "jsx-text" ||
@@ -707,6 +713,8 @@ export async function runInitWizard(): Promise<void> {
     batchSize: config.translation?.batchSize ?? 50,
     concurrency: config.translation?.concurrency ?? 3,
     retries: config.translation?.retries ?? 2,
+    onProgress: (c, t) => { s2.message(`Generating keys... ${c}/${t}`); },
+    onUsage: (usage) => usageTracker.add(usage),
   });
   s2.stop("Generating keys... done");
 
@@ -742,6 +750,7 @@ export async function runInitWizard(): Promise<void> {
       i18nImport,
       mode,
       componentPath,
+      onProgress: (c, t) => { s3.message(`Codegen... ${c}/${t} files`); },
     },
     cwd,
   );
@@ -749,7 +758,20 @@ export async function runInitWizard(): Promise<void> {
     `Codegen... ${codegenResult.stringsWrapped} strings wrapped in ${codegenResult.filesModified} files`,
   );
 
-  const postScan = await scan(scanOptions, cwd);
+  const moduleLevelStrings = transformableStrings.filter((s) => s.moduleLevel);
+  if (moduleLevelStrings.length > 0) {
+    p.log.warn(
+      `${moduleLevelStrings.length} module-level string(s) need manual resolution (codegen cannot auto-transform them):\n` +
+        moduleLevelStrings
+          .map((s) => `  "${s.text}" (${s.propName ?? "unknown"}, ${s.file}:${s.line})`)
+          .join("\n") +
+        "\n  Tip: move these into a helper like getItems(t) so t() is available at call site.",
+    );
+  }
+
+  const postScan = await scan(scanOptions, cwd, {
+    onProgress: (c, t) => { s3.message(`Validating... ${c}/${t} files`); },
+  });
 
   const keyToText: Record<string, string> = {};
   for (const [text, key] of Object.entries(textToKey)) {
@@ -807,6 +829,8 @@ export async function runInitWizard(): Promise<void> {
       sourceLocale,
       targetLocale: locale,
       options: translationOpts,
+      onProgress: (c, t) => { st.message(`Translating ${locale}... ${c}/${t} keys`); },
+      onUsage: (usage) => usageTracker.add(usage),
     });
 
     const targetFile = join(resolvedMessagesDir, `${locale}.json`);
@@ -821,6 +845,13 @@ export async function runInitWizard(): Promise<void> {
     );
 
     st.stop(`Translating ${locale}... done`);
+  }
+
+  const usage = usageTracker.get();
+  if (usage.totalTokens > 0) {
+    const cost = await estimateCost(model, usage);
+    const costStr = cost ? ` · ${formatCost(cost.totalUSD)}` : "";
+    p.log.info(`${formatUsage(usage)}${costStr}`);
   }
 
   p.outro("You're all set!");

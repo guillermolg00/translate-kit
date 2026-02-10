@@ -61,10 +61,15 @@ function buildSchema(keys: string[]): z.ZodObject<Record<string, z.ZodString>> {
   return z.object(shape);
 }
 
+interface BatchResult {
+  translations: Record<string, string>;
+  usage: { inputTokens: number; outputTokens: number };
+}
+
 async function translateBatchWithRetry(
   input: TranslateBatchInput,
   retries: number,
-): Promise<Record<string, string>> {
+): Promise<BatchResult> {
   const { model, entries, sourceLocale, targetLocale, options } = input;
   const keys = Object.keys(entries);
   const prompt = buildPrompt(entries, sourceLocale, targetLocale, options);
@@ -72,14 +77,18 @@ async function translateBatchWithRetry(
 
   const shouldValidate = options?.validatePlaceholders !== false;
   let lastError: Error | undefined;
+  let totalUsage = { inputTokens: 0, outputTokens: 0 };
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const { object } = await generateObject({
+      const { object, usage } = await generateObject({
         model,
         prompt,
         schema,
       });
+
+      totalUsage.inputTokens += usage.inputTokens ?? 0;
+      totalUsage.outputTokens += usage.outputTokens ?? 0;
 
       if (shouldValidate) {
         const validation = validateBatch(entries, object);
@@ -98,7 +107,7 @@ async function translateBatchWithRetry(
         }
       }
 
-      return object;
+      return { translations: object, usage: totalUsage };
     } catch (error) {
       lastError = error as Error;
       if (attempt < retries) {
@@ -118,6 +127,8 @@ export interface TranslateAllInput {
   targetLocale: string;
   options?: TranslationOptions;
   onBatchComplete?: (translated: Record<string, string>) => void;
+  onProgress?: (completed: number, total: number) => void;
+  onUsage?: (usage: { inputTokens: number; outputTokens: number }) => void;
 }
 
 export async function translateAll(
@@ -130,6 +141,8 @@ export async function translateAll(
     targetLocale,
     options,
     onBatchComplete,
+    onProgress,
+    onUsage,
   } = input;
 
   const keys = Object.keys(entries);
@@ -151,19 +164,30 @@ export async function translateAll(
   }
 
   const results: Record<string, string> = {};
+  let completedKeys = 0;
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
 
   await Promise.all(
     batches.map((batch) =>
       limit(async () => {
-        const translated = await translateBatchWithRetry(
+        const { translations, usage } = await translateBatchWithRetry(
           { model, entries: batch, sourceLocale, targetLocale, options },
           retries,
         );
-        Object.assign(results, translated);
-        onBatchComplete?.(translated);
+        Object.assign(results, translations);
+        totalInputTokens += usage.inputTokens;
+        totalOutputTokens += usage.outputTokens;
+        completedKeys += Object.keys(batch).length;
+        onProgress?.(completedKeys, keys.length);
+        onBatchComplete?.(translations);
       }),
     ),
   );
+
+  if (totalInputTokens > 0 || totalOutputTokens > 0) {
+    onUsage?.({ inputTokens: totalInputTokens, outputTokens: totalOutputTokens });
+  }
 
   return results;
 }

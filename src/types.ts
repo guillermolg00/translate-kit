@@ -60,6 +60,10 @@ export interface ExtractedString {
   propName?: string;
   parentTag?: string;
   id?: string;
+  siblingTexts?: string[];
+  routePath?: string;
+  sectionHeading?: string;
+  moduleLevel?: boolean;
 }
 
 export interface TranslationResult {

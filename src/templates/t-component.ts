@@ -23,22 +23,35 @@ export function useT() {
 }
 `;
 
-export const SERVER_TEMPLATE = `import type { ReactNode } from "react";
+export function serverTemplate(clientBasename: string): string {
+  return `import type { ReactNode } from "react";
+import { cache } from "react";
+export { I18nProvider } from "./${clientBasename}";
 
 type Messages = Record<string, string>;
 
-export function T({ id, children, messages = {} }: { id?: string; children: ReactNode; messages?: Messages }) {
-  if (!id) return <>{children}</>;
-  return <>{messages[id] ?? children}</>;
+// Per-request message store using React cache
+const getMessageStore = cache(() => ({ current: {} as Messages }));
+
+export function setServerMessages(messages: Messages) {
+  getMessageStore().current = messages;
 }
 
-export function createT(messages: Messages = {}) {
+export function T({ id, children, messages }: { id?: string; children: ReactNode; messages?: Messages }) {
+  if (!id) return <>{children}</>;
+  const msgs = messages ?? getMessageStore().current;
+  return <>{msgs[id] ?? children}</>;
+}
+
+export function createT(messages?: Messages) {
+  const msgs = messages ?? getMessageStore().current;
   return (text: string, id?: string): string => {
     if (!id) return text;
-    return messages[id] ?? text;
+    return msgs[id] ?? text;
   };
 }
 `;
+}
 
 export function generateI18nHelper(opts: {
   sourceLocale: string;

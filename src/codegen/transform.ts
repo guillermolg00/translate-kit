@@ -180,6 +180,9 @@ export function transform(
     ObjectProperty(path: NodePath<t.ObjectProperty>) {
       if (!isInsideFunction(path)) return;
 
+      const compName = getComponentName(path);
+      if (!compName) return;
+
       const keyNode = path.node.key;
       if (keyNode.type !== "Identifier" && keyNode.type !== "StringLiteral")
         return;
@@ -199,8 +202,7 @@ export function transform(
       ]);
       stringsWrapped++;
 
-      const compName = getComponentName(path);
-      if (compName) componentsNeedingT.add(compName);
+      componentsNeedingT.add(compName);
     },
   });
 
@@ -489,6 +491,9 @@ function transformInline(
     ObjectProperty(path: NodePath<t.ObjectProperty>) {
       if (!isInsideFunction(path)) return;
 
+      const compName = getComponentName(path);
+      if (!compName) return;
+
       const keyNode = path.node.key;
       if (keyNode.type !== "Identifier" && keyNode.type !== "StringLiteral")
         return;
@@ -509,8 +514,7 @@ function transformInline(
       ]);
       stringsWrapped++;
 
-      const compName = getComponentName(path);
-      if (compName) componentsNeedingT.add(compName);
+      componentsNeedingT.add(compName);
     },
   });
 

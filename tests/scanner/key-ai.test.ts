@@ -55,7 +55,7 @@ function makeMockResponse(mappings: { index: number; key: string }[]) {
   return {
     object: { mappings },
     finishReason: "stop",
-    usage: { promptTokens: 100, completionTokens: 50 },
+    usage: { inputTokens: 100, outputTokens: 50 },
     rawResponse: undefined,
     toJsonResponse: () => new Response(),
     request: {} as any,
@@ -183,5 +183,81 @@ describe("generateSemanticKeys", () => {
     });
 
     expect(Object.keys(result)).toHaveLength(4);
+  });
+
+  it("calls onUsage with accumulated tokens", async () => {
+    vi.mocked(generateObject).mockResolvedValueOnce(
+      makeMockResponse([
+        { index: 0, key: "auth.signIn" },
+        { index: 1, key: "hero.welcome" },
+        { index: 2, key: "common.save" },
+        { index: 3, key: "common.searchPlaceholder" },
+      ]),
+    );
+
+    const onUsage = vi.fn();
+    await generateSemanticKeys({
+      model: mockModel,
+      strings: mockStrings,
+      onUsage,
+    });
+
+    expect(onUsage).toHaveBeenCalledTimes(1);
+    const usage = onUsage.mock.calls[0][0];
+    expect(usage.inputTokens).toBe(100);
+    expect(usage.outputTokens).toBe(50);
+  });
+
+  it("calls onProgress during batch processing", async () => {
+    vi.mocked(generateObject).mockResolvedValueOnce(
+      makeMockResponse([
+        { index: 0, key: "auth.signIn" },
+        { index: 1, key: "hero.welcome" },
+        { index: 2, key: "common.save" },
+        { index: 3, key: "common.searchPlaceholder" },
+      ]),
+    );
+
+    const onProgress = vi.fn();
+    await generateSemanticKeys({
+      model: mockModel,
+      strings: mockStrings,
+      onProgress,
+    });
+
+    expect(onProgress).toHaveBeenCalled();
+    const lastCall = onProgress.mock.calls[onProgress.mock.calls.length - 1];
+    expect(lastCall[0]).toBe(lastCall[1]); // completed === total
+  });
+
+  it("includes route and sibling info in prompt when present", async () => {
+    const enrichedStrings: ExtractedString[] = [
+      {
+        text: "Dashboard",
+        type: "jsx-text",
+        file: "src/app/dashboard/page.tsx",
+        line: 1,
+        column: 0,
+        componentName: "DashboardPage",
+        parentTag: "h1",
+        routePath: "dashboard",
+        siblingTexts: ["Welcome back", "Your stats"],
+        sectionHeading: "Dashboard",
+      },
+    ];
+
+    vi.mocked(generateObject).mockResolvedValueOnce(
+      makeMockResponse([{ index: 0, key: "dashboard.title" }]),
+    );
+
+    await generateSemanticKeys({
+      model: mockModel,
+      strings: enrichedStrings,
+    });
+
+    const call = vi.mocked(generateObject).mock.calls[0][0];
+    const prompt = call.prompt as string;
+    expect(prompt).toContain("route: dashboard");
+    expect(prompt).toContain('siblings: ["Welcome back", "Your stats"]');
   });
 });

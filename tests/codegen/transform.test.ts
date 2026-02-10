@@ -158,6 +158,20 @@ describe("codegen transform", () => {
     expect(result.modified).toBe(false);
   });
 
+  it("does not transform object properties inside non-component callbacks", () => {
+    const code = `const MyMark = SomeLib.create(() => {
+      return { title: "Project Management" };
+    });
+    function App() { return <div />; }`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Project Management": "features.projectManagement" };
+    const result = transform(ast, map);
+
+    expect(result.stringsWrapped).toBe(0);
+    expect(result.modified).toBe(false);
+    expect(result.code).toContain('title: "Project Management"');
+  });
+
   it("does not wrap module-level object properties like metadata", () => {
     const code = `
       export const metadata = {
@@ -278,6 +292,20 @@ describe("codegen transform (inline mode)", () => {
 
     expect(result.modified).toBe(false);
     expect(result.stringsWrapped).toBe(0);
+  });
+
+  it("does not transform object properties inside non-component callbacks", () => {
+    const code = `const MyMark = SomeLib.create(() => {
+      return { title: "Project Management" };
+    });
+    function App() { return <div />; }`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Project Management": "features.projectManagement" };
+    const result = transform(ast, map, inlineOpts);
+
+    expect(result.stringsWrapped).toBe(0);
+    expect(result.modified).toBe(false);
+    expect(result.code).toContain('title: "Project Management"');
   });
 
   it("repairs createT(messages) → createT() when messages is not in scope", () => {
