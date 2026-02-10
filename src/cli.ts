@@ -84,6 +84,13 @@ const translateCommand = defineCommand({
     const verbose = args.verbose;
     const mode = config.mode ?? "keys";
 
+    if (args.locale && !/^[a-zA-Z0-9_-]+$/.test(args.locale)) {
+      logError(
+        `Invalid locale "${args.locale}". Locale must only contain letters, numbers, hyphens, and underscores.`,
+      );
+      process.exit(1);
+    }
+
     const locales = args.locale ? [args.locale] : targetLocales;
 
     if (args.locale && !targetLocales.includes(args.locale)) {
