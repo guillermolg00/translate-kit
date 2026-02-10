@@ -30,6 +30,14 @@ type JSXChild =
   | t.JSXElement
   | t.JSXFragment;
 
+function hasSubstantialSiblings(parent: NodePath<t.JSXElement>): boolean {
+  const count = parent.node.children.filter((child: JSXChild) => {
+    if (child.type === "JSXText") return child.value.trim().length > 0;
+    return true;
+  }).length;
+  return count > 1;
+}
+
 function findLastImportIndex(ast: File): number {
   let idx = -1;
   for (let i = 0; i < ast.program.body.length; i++) {
@@ -211,12 +219,7 @@ export function transform(
         t.callExpression(t.identifier("t"), [t.stringLiteral(key)]),
       );
 
-      const siblings = parent.node.children.filter((child: JSXChild) => {
-        if (child.type === "JSXText") return child.value.trim().length > 0;
-        return true;
-      });
-
-      if (siblings.length === 1) {
+      if (!hasSubstantialSiblings(parent)) {
         path.replaceWith(tCall);
       } else {
         const raw = path.node.value;
@@ -596,12 +599,7 @@ function transformInline(
         false,
       );
 
-      const siblings = parent.node.children.filter((child: JSXChild) => {
-        if (child.type === "JSXText") return child.value.trim().length > 0;
-        return true;
-      });
-
-      if (siblings.length === 1) {
+      if (!hasSubstantialSiblings(parent)) {
         path.replaceWith(tElement);
       } else {
         const raw = path.node.value;

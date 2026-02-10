@@ -3,7 +3,7 @@ import { glob } from "tinyglobby";
 import pLimit from "p-limit";
 import { parseFile } from "../scanner/parser.js";
 import { transform, type TransformOptions } from "./transform.js";
-import { logVerbose, logWarning } from "../logger.js";
+import { logWarning } from "../logger.js";
 
 export interface CodegenOptions {
   include: string[];
@@ -50,9 +50,8 @@ export async function codegen(
         try {
           ast = parseFile(code, filePath);
         } catch (err) {
-          logVerbose(
+          logWarning(
             `Skipping unparseable file ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
-            true,
           );
           completed++;
           options.onProgress?.(completed, files.length);

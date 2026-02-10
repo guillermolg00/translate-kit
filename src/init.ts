@@ -17,6 +17,7 @@ import {
 } from "./templates/t-component.js";
 import { parseFile } from "./scanner/parser.js";
 import { createUsageTracker, estimateCost, formatUsage, formatCost } from "./usage.js";
+import { validateLocale } from "./cli-utils.js";
 
 const AI_PROVIDERS = {
   openai: {
@@ -183,7 +184,6 @@ function canParse(content: string, filePath: string): boolean {
 
 async function safeWriteModifiedFile(
   filePath: string,
-  original: string,
   modified: string,
   label: string,
 ): Promise<boolean> {
@@ -327,7 +327,6 @@ export default getRequestConfig(async () => {
       if (
         await safeWriteModifiedFile(
           nextConfigPath,
-          content,
           updated,
           "next.config.ts",
         )
@@ -342,7 +341,6 @@ export default getRequestConfig(async () => {
   if (layoutPath) {
     let layoutContent = await readFile(layoutPath, "utf-8");
     if (!layoutContent.includes("NextIntlClientProvider")) {
-      const original = layoutContent;
       const importLines =
         'import { NextIntlClientProvider } from "next-intl";\n' +
         'import { getMessages } from "next-intl/server";\n';
@@ -367,7 +365,6 @@ export default getRequestConfig(async () => {
       if (
         await safeWriteModifiedFile(
           layoutPath,
-          original,
           layoutContent,
           "root layout",
         )
@@ -434,7 +431,6 @@ async function setupInlineI18n(
   if (layoutPath) {
     let layoutContent = await readFile(layoutPath, "utf-8");
     if (!layoutContent.includes("I18nProvider")) {
-      const original = layoutContent;
       const importLines =
         `import { I18nProvider } from "${componentPath}";\n` +
         `import { setServerMessages } from "${componentPath}-server";\n` +
@@ -460,7 +456,6 @@ async function setupInlineI18n(
       if (
         await safeWriteModifiedFile(
           layoutPath,
-          original,
           layoutContent,
           "root layout",
         )
@@ -537,6 +532,11 @@ export async function runInitWizard(): Promise<void> {
   const sourceLocale = await p.text({
     message: "Source locale:",
     initialValue: "en",
+    validate(value) {
+      if (!validateLocale(value)) {
+        return "Invalid locale. Use only letters, numbers, hyphens, and underscores.";
+      }
+    },
   });
   if (p.isCancel(sourceLocale)) cancel();
 

@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { flatten } from "./flatten.js";
 import type { DiffResult, LockFile } from "./types.js";
 
 export function hashValue(value: string): string {
@@ -73,21 +72,4 @@ export function computeDiff(
   }
 
   return { added, modified, removed, unchanged };
-}
-
-export async function diff(
-  sourceFile: string,
-  targetFile: string,
-  messagesDir: string,
-): Promise<DiffResult> {
-  const [sourceRaw, targetRaw, lockData] = await Promise.all([
-    loadJsonFile(sourceFile),
-    loadJsonFile(targetFile),
-    loadLockFile(messagesDir),
-  ]);
-
-  const sourceFlat = flatten(sourceRaw);
-  const targetFlat = flatten(targetRaw);
-
-  return computeDiff(sourceFlat, targetFlat, lockData);
 }

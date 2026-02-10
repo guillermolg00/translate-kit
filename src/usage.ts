@@ -26,8 +26,9 @@ export async function estimateCost(
   usage: TokenUsage,
 ): Promise<{ totalUSD: number; inputUSD: number; outputUSD: number } | null> {
   try {
-    const provider = (model as any).provider ?? "";
-    const modelId = (model as any).modelId ?? "";
+    const m = model as Record<string, unknown>;
+    const provider = typeof m.provider === "string" ? m.provider : "unknown";
+    const modelId = typeof m.modelId === "string" ? m.modelId : "unknown";
     const fullId = `${provider}/${modelId}`;
     const providers = await fetchModels(provider);
     const costs = getTokenCosts({
