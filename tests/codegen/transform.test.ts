@@ -2,7 +2,10 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseFile } from "../../src/scanner/parser.js";
-import { transform, type TransformOptions } from "../../src/codegen/transform.js";
+import {
+  transform,
+  type TransformOptions,
+} from "../../src/codegen/transform.js";
 
 const fixturesDir = join(import.meta.dirname, "fixtures");
 
@@ -72,7 +75,9 @@ describe("codegen transform", () => {
     const result = transform(ast, textToKey);
 
     expect(result.modified).toBe(true);
-    expect(result.code).toContain('placeholder={t("common.searchPlaceholder")}');
+    expect(result.code).toContain(
+      'placeholder={t("common.searchPlaceholder")}',
+    );
   });
 
   it("uses custom i18nImport", () => {
@@ -140,9 +145,13 @@ describe("codegen transform", () => {
     expect(result.stringsWrapped).toBe(4);
     expect(result.modified).toBe(true);
     expect(result.code).toContain('title: t("features.projectManagement")');
-    expect(result.code).toContain('description: t("features.projectManagementDesc")');
+    expect(result.code).toContain(
+      'description: t("features.projectManagementDesc")',
+    );
     expect(result.code).toContain('title: t("features.taskManagement")');
-    expect(result.code).toContain('description: t("features.taskManagementDesc")');
+    expect(result.code).toContain(
+      'description: t("features.taskManagementDesc")',
+    );
   });
 
   it("does not wrap non-content object properties", () => {
@@ -151,7 +160,11 @@ describe("codegen transform", () => {
       return <div />;
     }`;
     const ast = parseFile(code, "test.tsx");
-    const map = { star: "icon.star", "text-red": "class.red", "/about": "link.about" };
+    const map = {
+      star: "icon.star",
+      "text-red": "class.red",
+      "/about": "link.about",
+    };
     const result = transform(ast, map);
 
     expect(result.stringsWrapped).toBe(0);
@@ -183,8 +196,12 @@ function Footer() {
     const result = transform(ast, textToKey);
 
     expect(result.stringsWrapped).toBe(2);
-    expect(result.code).toMatch(/function Header\(\) \{\s*const t = useTranslations\(\)/);
-    expect(result.code).toMatch(/function Footer\(\) \{\s*const t = useTranslations\(\)/);
+    expect(result.code).toMatch(
+      /function Header\(\) \{\s*const t = useTranslations\(\)/,
+    );
+    expect(result.code).toMatch(
+      /function Footer\(\) \{\s*const t = useTranslations\(\)/,
+    );
   });
 
   it("injects t only into components that need it, not pre-existing ones", () => {
@@ -201,10 +218,16 @@ function Footer() {
 
     expect(result.stringsWrapped).toBe(1);
     // Footer gets t injected
-    expect(result.code).toMatch(/function Footer\(\) \{\s*const t = useTranslations\(\)/);
+    expect(result.code).toMatch(
+      /function Footer\(\) \{\s*const t = useTranslations\(\)/,
+    );
     // Header keeps its existing single t declaration
-    const headerMatches = result.code.match(/function Header[\s\S]*?function Footer/);
-    const headerTCount = (headerMatches?.[0].match(/useTranslations\(\)/g) || []).length;
+    const headerMatches = result.code.match(
+      /function Header[\s\S]*?function Footer/,
+    );
+    const headerTCount = (
+      headerMatches?.[0].match(/useTranslations\(\)/g) || []
+    ).length;
     expect(headerTCount).toBe(1);
   });
 
@@ -241,8 +264,12 @@ describe("codegen transform (inline mode)", () => {
 
     expect(result.modified).toBe(true);
     expect(result.stringsWrapped).toBe(4);
-    expect(result.code).toContain('<T id="hero.welcome">Welcome to our platform</T>');
-    expect(result.code).toContain('<T id="hero.getStarted">Get started with your journey today</T>');
+    expect(result.code).toContain(
+      '<T id="hero.welcome">Welcome to our platform</T>',
+    );
+    expect(result.code).toContain(
+      '<T id="hero.getStarted">Get started with your journey today</T>',
+    );
     expect(result.code).toContain('<T id="common.signUp">Sign up now</T>');
   });
 
@@ -262,13 +289,29 @@ describe("codegen transform (inline mode)", () => {
     expect(result.code).toContain('import { T } from "@/components/t"');
   });
 
+  it("detects files with hooks as client even without 'use client' directive", () => {
+    const code = `import { useQuery } from "@tanstack/react-query";
+import { usePathname } from "next/navigation";
+export const NavItem = () => {
+  const pathname = usePathname();
+  const { data } = useQuery({ queryKey: ["test"] });
+  return <h1>Welcome to our platform</h1>;
+};`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, textToKey, inlineOpts);
+
+    // Should import from client module since file uses hooks
+    expect(result.code).toContain('import { T } from "@/components/t"');
+    expect(result.code).not.toContain("t-server");
+  });
+
   it("injects T and createT import for server files", () => {
     const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
     const ast = parseFile(code, "before.tsx");
     const result = transform(ast, textToKey, inlineOpts);
 
     // Server file (no "use client" directive)
-    expect(result.code).toContain('@/components/t-server');
+    expect(result.code).toContain("@/components/t-server");
   });
 
   it("injects useT hook for client files with attributes", () => {
@@ -317,8 +360,12 @@ describe("codegen transform (inline mode)", () => {
 
     expect(result.stringsWrapped).toBe(2);
     expect(result.modified).toBe(true);
-    expect(result.code).toContain('title: t("Project Management", "features.projectManagement")');
-    expect(result.code).toContain('description: t("Manage your projects.", "features.projectManagementDesc")');
+    expect(result.code).toContain(
+      'title: t("Project Management", "features.projectManagement")',
+    );
+    expect(result.code).toContain(
+      'description: t("Manage your projects.", "features.projectManagementDesc")',
+    );
   });
 
   it("does not modify files without matching strings", () => {
@@ -355,8 +402,12 @@ function Footer() {
     const result = transform(ast, textToKey, inlineOpts);
 
     expect(result.stringsWrapped).toBe(2);
-    expect(result.code).toMatch(/function Header\(\) \{\s*const t = createT\(\)/);
-    expect(result.code).toMatch(/function Footer\(\) \{\s*const t = createT\(\)/);
+    expect(result.code).toMatch(
+      /function Header\(\) \{\s*const t = createT\(\)/,
+    );
+    expect(result.code).toMatch(
+      /function Footer\(\) \{\s*const t = createT\(\)/,
+    );
   });
 
   it("repairs createT(messages) → createT() when messages is not in scope", () => {
@@ -390,7 +441,8 @@ export default function Logo() {
 
 describe("codegen transform (template literals, keys mode)", () => {
   it("transforms JSX expression template literal → t(key, { vars })", () => {
-    const code = "function Greeting({ name }) { return <p>{`Hello ${name}`}</p>; }";
+    const code =
+      "function Greeting({ name }) { return <p>{`Hello ${name}`}</p>; }";
     const ast = parseFile(code, "test.tsx");
     const map = { "Hello {name}": "greeting.hello" };
     const result = transform(ast, map);
@@ -402,7 +454,8 @@ describe("codegen transform (template literals, keys mode)", () => {
   });
 
   it("transforms JSX attribute template literal → t(key, { vars })", () => {
-    const code = "function App({ type }) { return <input placeholder={`Search ${type}`} />; }";
+    const code =
+      "function App({ type }) { return <input placeholder={`Search ${type}`} />; }";
     const ast = parseFile(code, "test.tsx");
     const map = { "Search {type}": "common.searchType" };
     const result = transform(ast, map);
@@ -455,20 +508,25 @@ describe("codegen transform (conditional expressions, keys mode)", () => {
   it("transforms basic ternary in JSX expression", () => {
     const code = `function App({ isAdmin }) { return <p>{isAdmin ? "Admin Panel" : "Dashboard"}</p>; }`;
     const ast = parseFile(code, "test.tsx");
-    const map = { "Admin Panel": "admin.panel", "Dashboard": "dashboard.title" };
+    const map = { "Admin Panel": "admin.panel", Dashboard: "dashboard.title" };
     const result = transform(ast, map);
 
     expect(result.modified).toBe(true);
     expect(result.stringsWrapped).toBe(2);
     expect(result.code).toContain('t("admin.panel")');
     expect(result.code).toContain('t("dashboard.title")');
-    expect(result.code).toMatch(/isAdmin\s*\?\s*t\("admin\.panel"\)\s*:\s*t\("dashboard\.title"\)/);
+    expect(result.code).toMatch(
+      /isAdmin\s*\?\s*t\("admin\.panel"\)\s*:\s*t\("dashboard\.title"\)/,
+    );
   });
 
   it("transforms ternary in JSX attribute", () => {
     const code = `function App({ isAdmin }) { return <input placeholder={isAdmin ? "Search users" : "Search items"} />; }`;
     const ast = parseFile(code, "test.tsx");
-    const map = { "Search users": "search.users", "Search items": "search.items" };
+    const map = {
+      "Search users": "search.users",
+      "Search items": "search.items",
+    };
     const result = transform(ast, map);
 
     expect(result.modified).toBe(true);
@@ -483,7 +541,7 @@ describe("codegen transform (conditional expressions, keys mode)", () => {
       return <div />;
     }`;
     const ast = parseFile(code, "test.tsx");
-    const map = { "Admin": "role.admin", "User": "role.user" };
+    const map = { Admin: "role.admin", User: "role.user" };
     const result = transform(ast, map);
 
     expect(result.modified).toBe(true);
@@ -495,7 +553,7 @@ describe("codegen transform (conditional expressions, keys mode)", () => {
   it("transforms only mapped branch (mixed ternary)", () => {
     const code = `function App({ isAdmin, role }) { return <p>{isAdmin ? "Admin" : role}</p>; }`;
     const ast = parseFile(code, "test.tsx");
-    const map = { "Admin": "role.admin" };
+    const map = { Admin: "role.admin" };
     const result = transform(ast, map);
 
     expect(result.modified).toBe(true);
@@ -507,7 +565,7 @@ describe("codegen transform (conditional expressions, keys mode)", () => {
   it("transforms nested ternaries", () => {
     const code = `function App({ a, b }) { return <p>{a ? "X" : b ? "Y" : "Z"}</p>; }`;
     const ast = parseFile(code, "test.tsx");
-    const map = { "X": "key.x", "Y": "key.y", "Z": "key.z" };
+    const map = { X: "key.x", Y: "key.y", Z: "key.z" };
     const result = transform(ast, map);
 
     expect(result.modified).toBe(true);
@@ -536,7 +594,8 @@ describe("codegen transform (template literals + conditionals, inline mode)", ()
   };
 
   it("transforms template literal in JSX attribute → t(text, key, { vars })", () => {
-    const code = "function App({ type }) { return <input placeholder={`Search ${type}`} />; }";
+    const code =
+      "function App({ type }) { return <input placeholder={`Search ${type}`} />; }";
     const ast = parseFile(code, "test.tsx");
     const map = { "Search {type}": "common.searchType" };
     const result = transform(ast, map, inlineOpts);
@@ -544,11 +603,14 @@ describe("codegen transform (template literals + conditionals, inline mode)", ()
     expect(result.modified).toBe(true);
     expect(result.stringsWrapped).toBe(1);
     expect(result.code).toContain('t("Search {type}", "common.searchType"');
-    expect(result.code).toMatch(/t\("Search \{type\}", "common\.searchType",\s*\{\s*type\s*\}\)/);
+    expect(result.code).toMatch(
+      /t\("Search \{type\}", "common\.searchType",\s*\{\s*type\s*\}\)/,
+    );
   });
 
   it("transforms template literal in JSX expression → t(text, key, { vars })", () => {
-    const code = "function Greeting({ name }) { return <p>{`Hello ${name}`}</p>; }";
+    const code =
+      "function Greeting({ name }) { return <p>{`Hello ${name}`}</p>; }";
     const ast = parseFile(code, "test.tsx");
     const map = { "Hello {name}": "greeting.hello" };
     const result = transform(ast, map, inlineOpts);
@@ -556,7 +618,9 @@ describe("codegen transform (template literals + conditionals, inline mode)", ()
     expect(result.modified).toBe(true);
     expect(result.stringsWrapped).toBe(1);
     expect(result.code).toContain('t("Hello {name}", "greeting.hello"');
-    expect(result.code).toMatch(/t\("Hello \{name\}", "greeting\.hello",\s*\{\s*name\s*\}\)/);
+    expect(result.code).toMatch(
+      /t\("Hello \{name\}", "greeting\.hello",\s*\{\s*name\s*\}\)/,
+    );
   });
 
   it("transforms template literal in object property → t(text, key, { vars })", () => {
@@ -571,7 +635,9 @@ describe("codegen transform (template literals + conditionals, inline mode)", ()
     expect(result.modified).toBe(true);
     expect(result.stringsWrapped).toBe(1);
     expect(result.code).toContain('t("Task {id}", "task.title"');
-    expect(result.code).toMatch(/t\("Task \{id\}", "task\.title",\s*\{\s*id\s*\}\)/);
+    expect(result.code).toMatch(
+      /t\("Task \{id\}", "task\.title",\s*\{\s*id\s*\}\)/,
+    );
   });
 
   it("transforms plain template literal without values arg", () => {
@@ -589,20 +655,22 @@ describe("codegen transform (template literals + conditionals, inline mode)", ()
   it("transforms ternary in JSX expression", () => {
     const code = `function App({ isAdmin }) { return <p>{isAdmin ? "Admin" : "User"}</p>; }`;
     const ast = parseFile(code, "test.tsx");
-    const map = { "Admin": "role.admin", "User": "role.user" };
+    const map = { Admin: "role.admin", User: "role.user" };
     const result = transform(ast, map, inlineOpts);
 
     expect(result.modified).toBe(true);
     expect(result.stringsWrapped).toBe(2);
     expect(result.code).toContain('t("Admin", "role.admin")');
     expect(result.code).toContain('t("User", "role.user")');
-    expect(result.code).toMatch(/isAdmin\s*\?\s*t\("Admin", "role\.admin"\)\s*:\s*t\("User", "role\.user"\)/);
+    expect(result.code).toMatch(
+      /isAdmin\s*\?\s*t\("Admin", "role\.admin"\)\s*:\s*t\("User", "role\.user"\)/,
+    );
   });
 
   it("transforms ternary in JSX attribute", () => {
     const code = `function App({ a }) { return <input placeholder={a ? "X" : "Y"} />; }`;
     const ast = parseFile(code, "test.tsx");
-    const map = { "X": "key.x", "Y": "key.y" };
+    const map = { X: "key.x", Y: "key.y" };
     const result = transform(ast, map, inlineOpts);
 
     expect(result.modified).toBe(true);
@@ -617,7 +685,7 @@ describe("codegen transform (template literals + conditionals, inline mode)", ()
       return <div />;
     }`;
     const ast = parseFile(code, "test.tsx");
-    const map = { "Admin": "role.admin", "User": "role.user" };
+    const map = { Admin: "role.admin", User: "role.user" };
     const result = transform(ast, map, inlineOpts);
 
     expect(result.modified).toBe(true);
@@ -627,9 +695,10 @@ describe("codegen transform (template literals + conditionals, inline mode)", ()
   });
 
   it("transforms ternary with template literal branch", () => {
-    const code = "function App({ a, n }) { return <p>{a ? `Hi ${n}` : \"Guest\"}</p>; }";
+    const code =
+      'function App({ a, n }) { return <p>{a ? `Hi ${n}` : "Guest"}</p>; }';
     const ast = parseFile(code, "test.tsx");
-    const map = { "Hi {n}": "greeting.hi", "Guest": "greeting.guest" };
+    const map = { "Hi {n}": "greeting.hi", Guest: "greeting.guest" };
     const result = transform(ast, map, inlineOpts);
 
     expect(result.modified).toBe(true);
@@ -642,13 +711,15 @@ describe("codegen transform (template literals + conditionals, inline mode)", ()
   it("transforms only mapped branch in mixed ternary", () => {
     const code = `function App({ isAdmin, role }) { return <p>{isAdmin ? "Admin" : role}</p>; }`;
     const ast = parseFile(code, "test.tsx");
-    const map = { "Admin": "role.admin" };
+    const map = { Admin: "role.admin" };
     const result = transform(ast, map, inlineOpts);
 
     expect(result.modified).toBe(true);
     expect(result.stringsWrapped).toBe(1);
     expect(result.code).toContain('t("Admin", "role.admin")');
-    expect(result.code).toMatch(/isAdmin\s*\?\s*t\("Admin", "role\.admin"\)\s*:\s*role/);
+    expect(result.code).toMatch(
+      /isAdmin\s*\?\s*t\("Admin", "role\.admin"\)\s*:\s*role/,
+    );
   });
 
   it("leaves unmapped template literal and ternary intact", () => {
@@ -659,6 +730,28 @@ describe("codegen transform (template literals + conditionals, inline mode)", ()
     expect(result.modified).toBe(false);
     expect(result.stringsWrapped).toBe(0);
     expect(result.code).toContain("`Hello ${name}`");
+  });
+});
+
+describe("codegen transform (inline client boundary repairs)", () => {
+  const inlineOpts: TransformOptions = {
+    mode: "inline",
+    componentPath: "@/components/t",
+  };
+
+  it("rewrites t-server imports to client inline runtime when forceClient is true", () => {
+    const code = `import { T, createT } from "@/components/t-server";
+export function Logo() {
+  const t = createT();
+  return <img alt={t("Mimir Logo", "common.mimirLogo")} />;
+}`;
+    const ast = parseFile(code, "logo.tsx");
+    const result = transform(ast, {}, { ...inlineOpts, forceClient: true });
+
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain('from "@/components/t"');
+    expect(result.code).not.toContain("t-server");
+    expect(result.code).toContain("useT");
   });
 });
 

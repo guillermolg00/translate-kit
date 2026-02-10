@@ -24,8 +24,17 @@ export function useT() {
 }
 `;
 
-export function serverTemplate(clientBasename: string): string {
-  return `import type { ReactNode } from "react";
+export function serverTemplate(
+  clientBasename: string,
+  opts?: {
+    sourceLocale: string;
+    targetLocales: string[];
+    messagesDir: string;
+  },
+): string {
+  if (!opts) {
+    // Legacy fallback (no lazy loading)
+    return `import type { ReactNode } from "react";
 import { cache } from "react";
 export { I18nProvider } from "./${clientBasename}";
 
@@ -51,6 +60,109 @@ export function createT(messages?: Messages) {
     if (!values) return raw;
     return raw.replace(/\\{(\\w+)\\}/g, (_, k) => String(values[k] ?? \`{\${k}}\`));
   };
+}
+`;
+  }
+
+  const allLocales = [opts.sourceLocale, ...opts.targetLocales];
+  const allLocalesStr = allLocales.map((l) => `"${l}"`).join(", ");
+
+  return `import type { ReactNode } from "react";
+import { cache } from "react";
+export { I18nProvider } from "./${clientBasename}";
+
+type Messages = Record<string, string>;
+
+const supported = [${allLocalesStr}] as const;
+type Locale = (typeof supported)[number];
+const defaultLocale: Locale = "${opts.sourceLocale}";
+const messagesDir = "${opts.messagesDir}";
+
+function parseAcceptLanguage(header: string): Locale {
+  const langs = header
+    .split(",")
+    .map((part) => {
+      const [lang, q] = part.trim().split(";q=");
+      return { lang: lang.split("-")[0].toLowerCase(), q: q ? parseFloat(q) : 1 };
+    })
+    .sort((a, b) => b.q - a.q);
+
+  for (const { lang } of langs) {
+    if (supported.includes(lang as Locale)) return lang as Locale;
+  }
+  return defaultLocale;
+}
+
+// Per-request cached message loading — works even when layout is cached during client-side navigation
+// Uses dynamic imports so this file can be safely imported from client components
+const getCachedMessages = cache(async (): Promise<Messages> => {
+  const { headers } = await import("next/headers");
+  const { readFile } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+
+  const h = await headers();
+  const acceptLang = h.get("accept-language") ?? "";
+  const locale = parseAcceptLanguage(acceptLang);
+  if (locale === defaultLocale) return {};
+  try {
+    const filePath = join(process.cwd(), messagesDir, \`\${locale}.json\`);
+    const content = await readFile(filePath, "utf-8");
+    return JSON.parse(content);
+  } catch {
+    return {};
+  }
+});
+
+// Per-request message store (populated by setServerMessages in layout)
+const getMessageStore = cache(() => ({ current: null as Messages | null }));
+
+export function setServerMessages(messages: Messages) {
+  getMessageStore().current = messages;
+}
+
+async function resolveMessages(explicit?: Messages): Promise<Messages> {
+  if (explicit) return explicit;
+  const store = getMessageStore().current;
+  if (store) return store;
+  return getCachedMessages();
+}
+
+export async function T({ id, children, messages }: { id?: string; children: ReactNode; messages?: Messages }) {
+  if (!id) return <>{children}</>;
+  const msgs = await resolveMessages(messages);
+  // Populate store so sync createT() calls in the same request benefit
+  if (!messages && !getMessageStore().current) {
+    getMessageStore().current = msgs;
+  }
+  return <>{msgs[id] ?? children}</>;
+}
+
+type TFn = (text: string, id?: string, values?: Record<string, string | number>) => string;
+
+// Backward-compatible: works both as sync createT() and async await createT()
+// - Sync: reads from store (works when layout called setServerMessages)
+// - Async: lazily loads messages from filesystem (works during client-side navigation)
+export function createT(messages?: Messages): TFn & PromiseLike<TFn> {
+  const t: TFn = (text, id, values) => {
+    const msgs = messages ?? getMessageStore().current ?? {};
+    const raw = id ? (msgs[id] ?? text) : text;
+    if (!values) return raw;
+    return raw.replace(/\\{(\\w+)\\}/g, (_, k) => String(values[k] ?? \`{\${k}}\`));
+  };
+
+  const asyncResult = resolveMessages(messages).then(msgs => {
+    if (!messages && !getMessageStore().current) {
+      getMessageStore().current = msgs;
+    }
+    const bound: TFn = (text, id, values) => {
+      const raw = id ? (msgs[id] ?? text) : text;
+      if (!values) return raw;
+      return raw.replace(/\\{(\\w+)\\}/g, (_, k) => String(values[k] ?? \`{\${k}}\`));
+    };
+    return bound;
+  });
+
+  return Object.assign(t, { then: asyncResult.then.bind(asyncResult) });
 }
 `;
 }

@@ -382,6 +382,11 @@ export default getRequestConfig(async () => {
 async function dropInlineComponents(
   cwd: string,
   componentPath: string,
+  localeOpts: {
+    sourceLocale: string;
+    targetLocales: string[];
+    messagesDir: string;
+  },
 ): Promise<void> {
   const fsPath = resolveComponentPath(cwd, componentPath);
   const dir = join(fsPath, "..");
@@ -392,7 +397,7 @@ async function dropInlineComponents(
   const clientBasename = basename(fsPath);
 
   await writeFile(clientFile, CLIENT_TEMPLATE, "utf-8");
-  await writeFile(serverFile, serverTemplate(clientBasename), "utf-8");
+  await writeFile(serverFile, serverTemplate(clientBasename, localeOpts), "utf-8");
 
   const relClient = relative(cwd, clientFile);
   const relServer = relative(cwd, serverFile);
@@ -629,7 +634,11 @@ export async function runInitWizard(): Promise<void> {
   p.log.success("Created translate-kit.config.ts");
 
   if (mode === "inline" && componentPath) {
-    await dropInlineComponents(cwd, componentPath);
+    await dropInlineComponents(cwd, componentPath, {
+      sourceLocale,
+      targetLocales,
+      messagesDir,
+    });
     await setupInlineI18n(
       cwd,
       componentPath,

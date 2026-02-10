@@ -58,6 +58,7 @@ export interface TransformOptions {
   i18nImport?: string;
   mode?: "keys" | "inline";
   componentPath?: string;
+  forceClient?: boolean;
 }
 
 function hasUseTranslationsImport(ast: File, importSource: string): boolean {
@@ -79,7 +80,6 @@ function hasUseTranslationsImport(ast: File, importSource: string): boolean {
   }
   return false;
 }
-
 
 function transformConditionalBranch(
   node: t.Expression,
@@ -296,7 +296,12 @@ export function transform(
       }
 
       let text: string | undefined;
-      let templateInfo: { placeholders: string[]; expressions: t.TemplateLiteral["expressions"] } | undefined;
+      let templateInfo:
+        | {
+            placeholders: string[];
+            expressions: t.TemplateLiteral["expressions"];
+          }
+        | undefined;
 
       if (value.type === "StringLiteral") {
         text = value.value;
@@ -332,7 +337,12 @@ export function transform(
       const key = textToKey[text];
       const args: t.Expression[] = [t.stringLiteral(key)];
       if (templateInfo && templateInfo.placeholders.length > 0) {
-        args.push(buildValuesObject(templateInfo.expressions, templateInfo.placeholders));
+        args.push(
+          buildValuesObject(
+            templateInfo.expressions,
+            templateInfo.placeholders,
+          ),
+        );
       }
       path.node.value = t.jsxExpressionContainer(
         t.callExpression(t.identifier("t"), args),
@@ -369,7 +379,12 @@ export function transform(
       }
 
       let text: string | undefined;
-      let templateInfo: { placeholders: string[]; expressions: t.TemplateLiteral["expressions"] } | undefined;
+      let templateInfo:
+        | {
+            placeholders: string[];
+            expressions: t.TemplateLiteral["expressions"];
+          }
+        | undefined;
 
       if (valueNode.type === "StringLiteral") {
         text = valueNode.value;
@@ -392,7 +407,12 @@ export function transform(
       const key = textToKey[text];
       const args: t.Expression[] = [t.stringLiteral(key)];
       if (templateInfo && templateInfo.placeholders.length > 0) {
-        args.push(buildValuesObject(templateInfo.expressions, templateInfo.placeholders));
+        args.push(
+          buildValuesObject(
+            templateInfo.expressions,
+            templateInfo.placeholders,
+          ),
+        );
       }
       path.node.value = t.callExpression(t.identifier("t"), args);
       stringsWrapped++;
@@ -487,7 +507,7 @@ function injectTIntoBlock(block: t.BlockStatement): void {
   block.body.unshift(tDecl);
 }
 
-function isClientFile(ast: File): boolean {
+export function detectClientFile(ast: File): boolean {
   if (ast.program.directives) {
     for (const directive of ast.program.directives) {
       if (directive.value?.value === "use client") {
@@ -504,7 +524,22 @@ function isClientFile(ast: File): boolean {
       return true;
     }
   }
-  return false;
+
+  // Detect files that use React hooks (use*() calls) — these are effectively
+  // client components even without an explicit "use client" directive, since
+  // they must be rendered inside a client component boundary.
+  let usesHooks = false;
+  traverse(ast, {
+    CallExpression(path: NodePath<t.CallExpression>) {
+      if (usesHooks) return;
+      const callee = path.node.callee;
+      if (callee.type === "Identifier" && /^use[A-Z]/.test(callee.name)) {
+        usesHooks = true;
+      }
+    },
+    noScope: true,
+  });
+  return usesHooks;
 }
 
 function hasInlineImport(
@@ -536,6 +571,50 @@ function hasInlineImport(
   return { hasT, hasHook };
 }
 
+function normalizeInlineImports(
+  ast: File,
+  componentPath: string,
+  isClient: boolean,
+): boolean {
+  const validSources = new Set([
+    componentPath,
+    `${componentPath}-server`,
+    `${componentPath}/t-server`,
+  ]);
+  const desiredSource = isClient ? componentPath : `${componentPath}-server`;
+  let changed = false;
+
+  for (const node of ast.program.body) {
+    if (node.type !== "ImportDeclaration") continue;
+    if (!validSources.has(node.source.value)) continue;
+
+    if (node.source.value !== desiredSource) {
+      node.source.value = desiredSource;
+      changed = true;
+    }
+
+    for (const spec of node.specifiers) {
+      if (
+        spec.type !== "ImportSpecifier" ||
+        spec.imported.type !== "Identifier"
+      ) {
+        continue;
+      }
+
+      if (isClient && spec.imported.name === "createT") {
+        spec.imported = t.identifier("useT");
+        changed = true;
+      }
+
+      if (!isClient && spec.imported.name === "useT") {
+        spec.imported = t.identifier("createT");
+        changed = true;
+      }
+    }
+  }
+
+  return changed;
+}
 
 function transformInline(
   ast: File,
@@ -543,11 +622,14 @@ function transformInline(
   options: TransformOptions,
 ): TransformResult {
   const componentPath = options.componentPath ?? "@/components/t";
-  const isClient = isClientFile(ast);
+  const isClient = options.forceClient || detectClientFile(ast);
   let stringsWrapped = 0;
   const componentsNeedingT = new Set<string>();
   let needsTComponent = false;
   let repaired = false;
+  let boundaryRepaired = false;
+
+  boundaryRepaired = normalizeInlineImports(ast, componentPath, isClient);
 
   if (!isClient) {
     traverse(ast, {
@@ -720,7 +802,10 @@ function transformInline(
       ];
       if (templateInfo && templateInfo.placeholders.length > 0) {
         args.push(
-          buildValuesObject(templateInfo.expressions, templateInfo.placeholders),
+          buildValuesObject(
+            templateInfo.expressions,
+            templateInfo.placeholders,
+          ),
         );
       }
       path.node.value = t.jsxExpressionContainer(
@@ -790,7 +875,10 @@ function transformInline(
       ];
       if (templateInfo && templateInfo.placeholders.length > 0) {
         args.push(
-          buildValuesObject(templateInfo.expressions, templateInfo.placeholders),
+          buildValuesObject(
+            templateInfo.expressions,
+            templateInfo.placeholders,
+          ),
         );
       }
       path.node.value = t.callExpression(t.identifier("t"), args);
@@ -800,11 +888,11 @@ function transformInline(
     },
   });
 
-  if (stringsWrapped === 0 && !repaired) {
+  if (stringsWrapped === 0 && !repaired && !boundaryRepaired) {
     return { code: generate(ast).code, stringsWrapped: 0, modified: false };
   }
 
-  if (stringsWrapped === 0 && repaired) {
+  if (stringsWrapped === 0 && (repaired || boundaryRepaired)) {
     const output = generate(ast, { retainLines: false });
     return { code: output.code, stringsWrapped: 0, modified: true };
   }
