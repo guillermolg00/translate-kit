@@ -33,10 +33,18 @@ async function loadMapFile(
   messagesDir: string,
 ): Promise<Record<string, string>> {
   const mapPath = join(messagesDir, ".translate-map.json");
+  let content: string;
   try {
-    const content = await readFile(mapPath, "utf-8");
+    content = await readFile(mapPath, "utf-8");
+  } catch {
+    return {};
+  }
+  try {
     return JSON.parse(content);
   } catch {
+    logWarning(
+      `.translate-map.json is corrupted (invalid JSON). Starting fresh.`,
+    );
     return {};
   }
 }
