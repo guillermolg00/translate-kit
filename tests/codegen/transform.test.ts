@@ -388,6 +388,147 @@ export default function Logo() {
   });
 });
 
+describe("codegen transform (template literals, keys mode)", () => {
+  it("transforms JSX expression template literal → t(key, { vars })", () => {
+    const code = "function Greeting({ name }) { return <p>{`Hello ${name}`}</p>; }";
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Hello {name}": "greeting.hello" };
+    const result = transform(ast, map);
+
+    expect(result.modified).toBe(true);
+    expect(result.stringsWrapped).toBe(1);
+    expect(result.code).toContain('t("greeting.hello"');
+    expect(result.code).toMatch(/t\("greeting\.hello",\s*\{\s*name\s*\}\)/);
+  });
+
+  it("transforms JSX attribute template literal → t(key, { vars })", () => {
+    const code = "function App({ type }) { return <input placeholder={`Search ${type}`} />; }";
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Search {type}": "common.searchType" };
+    const result = transform(ast, map);
+
+    expect(result.modified).toBe(true);
+    expect(result.stringsWrapped).toBe(1);
+    expect(result.code).toContain('t("common.searchType"');
+    expect(result.code).toMatch(/t\("common\.searchType",\s*\{\s*type\s*\}\)/);
+  });
+
+  it("transforms object property template literal → t(key, { vars })", () => {
+    const code = `function App({ id }) {
+      const item = { title: \`Task \${id}\` };
+      return <div />;
+    }`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Task {id}": "task.title" };
+    const result = transform(ast, map);
+
+    expect(result.modified).toBe(true);
+    expect(result.stringsWrapped).toBe(1);
+    expect(result.code).toContain('t("task.title"');
+    expect(result.code).toMatch(/t\("task\.title",\s*\{\s*id\s*\}\)/);
+  });
+
+  it("transforms plain template literal → t(key) without values object", () => {
+    const code = "function App() { return <p>{`Hello world`}</p>; }";
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Hello world": "greeting.helloWorld" };
+    const result = transform(ast, map);
+
+    expect(result.modified).toBe(true);
+    expect(result.stringsWrapped).toBe(1);
+    expect(result.code).toContain('t("greeting.helloWorld")');
+    expect(result.code).not.toContain("{})");
+  });
+
+  it("leaves unmapped template literal intact", () => {
+    const code = "function App({ name }) { return <p>{`Hello ${name}`}</p>; }";
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, {});
+
+    expect(result.modified).toBe(false);
+    expect(result.stringsWrapped).toBe(0);
+    expect(result.code).toContain("`Hello ${name}`");
+  });
+});
+
+describe("codegen transform (conditional expressions, keys mode)", () => {
+  it("transforms basic ternary in JSX expression", () => {
+    const code = `function App({ isAdmin }) { return <p>{isAdmin ? "Admin Panel" : "Dashboard"}</p>; }`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Admin Panel": "admin.panel", "Dashboard": "dashboard.title" };
+    const result = transform(ast, map);
+
+    expect(result.modified).toBe(true);
+    expect(result.stringsWrapped).toBe(2);
+    expect(result.code).toContain('t("admin.panel")');
+    expect(result.code).toContain('t("dashboard.title")');
+    expect(result.code).toMatch(/isAdmin\s*\?\s*t\("admin\.panel"\)\s*:\s*t\("dashboard\.title"\)/);
+  });
+
+  it("transforms ternary in JSX attribute", () => {
+    const code = `function App({ isAdmin }) { return <input placeholder={isAdmin ? "Search users" : "Search items"} />; }`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Search users": "search.users", "Search items": "search.items" };
+    const result = transform(ast, map);
+
+    expect(result.modified).toBe(true);
+    expect(result.stringsWrapped).toBe(2);
+    expect(result.code).toContain('t("search.users")');
+    expect(result.code).toContain('t("search.items")');
+  });
+
+  it("transforms ternary in object property", () => {
+    const code = `function App({ isAdmin }) {
+      const item = { title: isAdmin ? "Admin" : "User" };
+      return <div />;
+    }`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Admin": "role.admin", "User": "role.user" };
+    const result = transform(ast, map);
+
+    expect(result.modified).toBe(true);
+    expect(result.stringsWrapped).toBe(2);
+    expect(result.code).toContain('t("role.admin")');
+    expect(result.code).toContain('t("role.user")');
+  });
+
+  it("transforms only mapped branch (mixed ternary)", () => {
+    const code = `function App({ isAdmin, role }) { return <p>{isAdmin ? "Admin" : role}</p>; }`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Admin": "role.admin" };
+    const result = transform(ast, map);
+
+    expect(result.modified).toBe(true);
+    expect(result.stringsWrapped).toBe(1);
+    expect(result.code).toContain('t("role.admin")');
+    expect(result.code).toMatch(/isAdmin\s*\?\s*t\("role\.admin"\)\s*:\s*role/);
+  });
+
+  it("transforms nested ternaries", () => {
+    const code = `function App({ a, b }) { return <p>{a ? "X" : b ? "Y" : "Z"}</p>; }`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { "X": "key.x", "Y": "key.y", "Z": "key.z" };
+    const result = transform(ast, map);
+
+    expect(result.modified).toBe(true);
+    expect(result.stringsWrapped).toBe(3);
+    expect(result.code).toContain('t("key.x")');
+    expect(result.code).toContain('t("key.y")');
+    expect(result.code).toContain('t("key.z")');
+  });
+
+  it("leaves unmapped ternary intact", () => {
+    const code = `function App({ isAdmin }) { return <p>{isAdmin ? "Admin Panel" : "Dashboard"}</p>; }`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, {});
+
+    expect(result.modified).toBe(false);
+    expect(result.stringsWrapped).toBe(0);
+    expect(result.code).toContain('"Admin Panel"');
+    expect(result.code).toContain('"Dashboard"');
+  });
+});
+
 describe("AST validation post-codegen", () => {
   it("valid transformed code can be re-parsed (keys mode)", () => {
     const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");

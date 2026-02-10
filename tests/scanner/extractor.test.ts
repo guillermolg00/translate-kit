@@ -234,6 +234,150 @@ describe("extractor", () => {
     });
   });
 
+  describe("template literals", () => {
+    it("extracts template literal in JSX expression", () => {
+      const code = "function App({ name }) { return <p>{`Hello ${name}`}</p>; }";
+      const ast = parseFile(code, "test.tsx");
+      const strings = extractStrings(ast, "test.tsx");
+
+      const expr = strings.find((s) => s.type === "jsx-expression");
+      expect(expr).toBeDefined();
+      expect(expr?.text).toBe("Hello {name}");
+    });
+
+    it("extracts template literal in JSX attribute", () => {
+      const code = "function App({ type }) { return <input placeholder={`Search ${type}`} />; }";
+      const ast = parseFile(code, "test.tsx");
+      const strings = extractStrings(ast, "test.tsx");
+
+      const attr = strings.find((s) => s.type === "jsx-attribute");
+      expect(attr).toBeDefined();
+      expect(attr?.text).toBe("Search {type}");
+      expect(attr?.propName).toBe("placeholder");
+    });
+
+    it("extracts template literal in object property", () => {
+      const code = "function App({ id }) { const item = { title: `Task ${id}` }; return <div />; }";
+      const ast = parseFile(code, "test.tsx");
+      const strings = extractStrings(ast, "test.tsx");
+
+      const prop = strings.find((s) => s.type === "object-property");
+      expect(prop).toBeDefined();
+      expect(prop?.text).toBe("Task {id}");
+    });
+
+    it("extracts plain template literal (no expressions)", () => {
+      const code = "function App() { return <p>{`Hello world`}</p>; }";
+      const ast = parseFile(code, "test.tsx");
+      const strings = extractStrings(ast, "test.tsx");
+
+      const expr = strings.find((s) => s.type === "jsx-expression");
+      expect(expr).toBeDefined();
+      expect(expr?.text).toBe("Hello world");
+    });
+
+    it("extracts template literal with MemberExpression", () => {
+      const code = "function App({ user }) { return <p>{`Welcome ${user.name}`}</p>; }";
+      const ast = parseFile(code, "test.tsx");
+      const strings = extractStrings(ast, "test.tsx");
+
+      const expr = strings.find((s) => s.type === "jsx-expression");
+      expect(expr).toBeDefined();
+      expect(expr?.text).toBe("Welcome {userName}");
+    });
+
+    it("ignores template literal with unsupported expression", () => {
+      const code = "function App() { return <p>{`Hello ${getName()}`}</p>; }";
+      const ast = parseFile(code, "test.tsx");
+      const strings = extractStrings(ast, "test.tsx");
+
+      const expr = strings.find((s) => s.type === "jsx-expression");
+      expect(expr).toBeUndefined();
+    });
+  });
+
+  describe("conditional expressions", () => {
+    it("extracts both branches of ternary in JSX expression", () => {
+      const code = `function App({ isAdmin }) { return <p>{isAdmin ? "Admin Panel" : "Dashboard"}</p>; }`;
+      const ast = parseFile(code, "test.tsx");
+      const strings = extractStrings(ast, "test.tsx");
+
+      const exprs = strings.filter((s) => s.type === "jsx-expression");
+      expect(exprs).toHaveLength(2);
+      expect(exprs.map((s) => s.text)).toContain("Admin Panel");
+      expect(exprs.map((s) => s.text)).toContain("Dashboard");
+    });
+
+    it("extracts ternary in JSX attribute", () => {
+      const code = `function App({ isAdmin }) { return <input placeholder={isAdmin ? "Search users" : "Search items"} />; }`;
+      const ast = parseFile(code, "test.tsx");
+      const strings = extractStrings(ast, "test.tsx");
+
+      const attrs = strings.filter((s) => s.type === "jsx-attribute");
+      expect(attrs).toHaveLength(2);
+      expect(attrs.map((s) => s.text)).toContain("Search users");
+      expect(attrs.map((s) => s.text)).toContain("Search items");
+      expect(attrs[0].propName).toBe("placeholder");
+    });
+
+    it("extracts ternary in object property", () => {
+      const code = `function App({ isAdmin }) {
+        const item = { title: isAdmin ? "Admin" : "User" };
+        return <div />;
+      }`;
+      const ast = parseFile(code, "test.tsx");
+      const strings = extractStrings(ast, "test.tsx");
+
+      const props = strings.filter((s) => s.type === "object-property");
+      expect(props).toHaveLength(2);
+      expect(props.map((s) => s.text)).toContain("Admin");
+      expect(props.map((s) => s.text)).toContain("User");
+    });
+
+    it("extracts only string branch when other is variable (mixed)", () => {
+      const code = `function App({ isAdmin, role }) { return <p>{isAdmin ? "Admin" : role}</p>; }`;
+      const ast = parseFile(code, "test.tsx");
+      const strings = extractStrings(ast, "test.tsx");
+
+      const exprs = strings.filter((s) => s.type === "jsx-expression");
+      expect(exprs).toHaveLength(1);
+      expect(exprs[0].text).toBe("Admin");
+    });
+
+    it("extracts nested ternaries", () => {
+      const code = `function App({ a, b }) { return <p>{a ? "Admin" : b ? "Editor" : "Viewer"}</p>; }`;
+      const ast = parseFile(code, "test.tsx");
+      const strings = extractStrings(ast, "test.tsx");
+
+      const exprs = strings.filter((s) => s.type === "jsx-expression");
+      expect(exprs).toHaveLength(3);
+      const texts = exprs.map((s) => s.text);
+      expect(texts).toContain("Admin");
+      expect(texts).toContain("Editor");
+      expect(texts).toContain("Viewer");
+    });
+
+    it("extracts ternary with TemplateLiteral branch", () => {
+      const code = "function App({ isAdmin, name }) { return <p>{isAdmin ? `Hello ${name}` : \"Guest\"}</p>; }";
+      const ast = parseFile(code, "test.tsx");
+      const strings = extractStrings(ast, "test.tsx");
+
+      const exprs = strings.filter((s) => s.type === "jsx-expression");
+      expect(exprs).toHaveLength(2);
+      expect(exprs.map((s) => s.text)).toContain("Hello {name}");
+      expect(exprs.map((s) => s.text)).toContain("Guest");
+    });
+
+    it("extracts nothing when both branches are non-string", () => {
+      const code = `function App({ isAdmin, count, total }) { return <p>{isAdmin ? count : total}</p>; }`;
+      const ast = parseFile(code, "test.tsx");
+      const strings = extractStrings(ast, "test.tsx");
+
+      const exprs = strings.filter((s) => s.type === "jsx-expression");
+      expect(exprs).toHaveLength(0);
+    });
+  });
+
   describe("module-level object properties", () => {
     it("extracts module-level object properties with moduleLevel: true", () => {
       const code = `

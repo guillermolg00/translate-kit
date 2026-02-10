@@ -9,6 +9,10 @@ import {
   isInsideFunction,
   getComponentName,
 } from "../utils/ast-helpers.js";
+import {
+  buildTemplateLiteralText,
+  buildValuesObject,
+} from "../utils/template-literal.js";
 import { logWarning } from "../logger.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -69,6 +73,59 @@ function hasUseTranslationsImport(ast: File, importSource: string): boolean {
 }
 
 
+function transformConditionalBranch(
+  node: t.Expression,
+  textToKey: Record<string, string>,
+): { node: t.Expression; count: number } {
+  if (node.type === "ConditionalExpression") {
+    const cons = transformConditionalBranch(
+      node.consequent as t.Expression,
+      textToKey,
+    );
+    const alt = transformConditionalBranch(
+      node.alternate as t.Expression,
+      textToKey,
+    );
+    if (cons.count > 0 || alt.count > 0) {
+      return {
+        node: t.conditionalExpression(node.test, cons.node, alt.node),
+        count: cons.count + alt.count,
+      };
+    }
+    return { node, count: 0 };
+  }
+
+  if (node.type === "StringLiteral") {
+    const text = node.value.trim();
+    if (text && text in textToKey) {
+      const key = textToKey[text];
+      return {
+        node: t.callExpression(t.identifier("t"), [t.stringLiteral(key)]),
+        count: 1,
+      };
+    }
+    return { node, count: 0 };
+  }
+
+  if (node.type === "TemplateLiteral") {
+    const info = buildTemplateLiteralText(node.quasis, node.expressions);
+    if (info && info.text in textToKey) {
+      const key = textToKey[info.text];
+      const args: t.Expression[] = [t.stringLiteral(key)];
+      if (info.placeholders.length > 0) {
+        args.push(buildValuesObject(node.expressions, info.placeholders));
+      }
+      return {
+        node: t.callExpression(t.identifier("t"), args),
+        count: 1,
+      };
+    }
+    return { node, count: 0 };
+  }
+
+  return { node, count: 0 };
+}
+
 export function transform(
   ast: File,
   textToKey: Record<string, string>,
@@ -123,19 +180,80 @@ export function transform(
       if (compName) componentsNeedingT.add(compName);
     },
 
+    JSXExpressionContainer(path: NodePath<t.JSXExpressionContainer>) {
+      const expr = path.node.expression;
+      if (path.parent.type === "JSXAttribute") return;
+
+      if (expr.type === "ConditionalExpression") {
+        const result = transformConditionalBranch(expr, textToKey);
+        if (result.count > 0) {
+          path.node.expression = result.node;
+          stringsWrapped += result.count;
+          const compName = getComponentName(path);
+          if (compName) componentsNeedingT.add(compName);
+        }
+        return;
+      }
+
+      if (expr.type !== "TemplateLiteral") return;
+
+      const info = buildTemplateLiteralText(expr.quasis, expr.expressions);
+      if (!info) return;
+
+      const { text, placeholders } = info;
+      if (!(text in textToKey)) return;
+
+      const key = textToKey[text];
+      const args: t.Expression[] = [t.stringLiteral(key)];
+      if (placeholders.length > 0) {
+        args.push(buildValuesObject(expr.expressions, placeholders));
+      }
+      path.node.expression = t.callExpression(t.identifier("t"), args);
+      stringsWrapped++;
+
+      const compName = getComponentName(path);
+      if (compName) componentsNeedingT.add(compName);
+    },
+
     JSXAttribute(path: NodePath<t.JSXAttribute>) {
       const value = path.node.value;
       if (!value) return;
 
+      if (
+        value.type === "JSXExpressionContainer" &&
+        value.expression.type === "ConditionalExpression"
+      ) {
+        const result = transformConditionalBranch(value.expression, textToKey);
+        if (result.count > 0) {
+          path.node.value = t.jsxExpressionContainer(result.node);
+          stringsWrapped += result.count;
+          const compName = getComponentName(path);
+          if (compName) componentsNeedingT.add(compName);
+        }
+        return;
+      }
+
       let text: string | undefined;
+      let templateInfo: { placeholders: string[]; expressions: t.TemplateLiteral["expressions"] } | undefined;
 
       if (value.type === "StringLiteral") {
         text = value.value;
-      } else if (
-        value.type === "JSXExpressionContainer" &&
-        value.expression.type === "StringLiteral"
-      ) {
-        text = value.expression.value;
+      } else if (value.type === "JSXExpressionContainer") {
+        if (value.expression.type === "StringLiteral") {
+          text = value.expression.value;
+        } else if (value.expression.type === "TemplateLiteral") {
+          const info = buildTemplateLiteralText(
+            value.expression.quasis,
+            value.expression.expressions,
+          );
+          if (info) {
+            text = info.text;
+            templateInfo = {
+              placeholders: info.placeholders,
+              expressions: value.expression.expressions,
+            };
+          }
+        }
       }
 
       if (!text || !(text in textToKey)) return;
@@ -150,8 +268,12 @@ export function transform(
       }
 
       const key = textToKey[text];
+      const args: t.Expression[] = [t.stringLiteral(key)];
+      if (templateInfo && templateInfo.placeholders.length > 0) {
+        args.push(buildValuesObject(templateInfo.expressions, templateInfo.placeholders));
+      }
       path.node.value = t.jsxExpressionContainer(
-        t.callExpression(t.identifier("t"), [t.stringLiteral(key)]),
+        t.callExpression(t.identifier("t"), args),
       );
       stringsWrapped++;
 
@@ -173,15 +295,44 @@ export function transform(
       if (!isContentProperty(propName)) return;
 
       const valueNode = path.node.value;
-      if (valueNode.type !== "StringLiteral") return;
 
-      const text = valueNode.value;
+      if (valueNode.type === "ConditionalExpression") {
+        const result = transformConditionalBranch(valueNode, textToKey);
+        if (result.count > 0) {
+          path.node.value = result.node;
+          stringsWrapped += result.count;
+          componentsNeedingT.add(compName);
+        }
+        return;
+      }
+
+      let text: string | undefined;
+      let templateInfo: { placeholders: string[]; expressions: t.TemplateLiteral["expressions"] } | undefined;
+
+      if (valueNode.type === "StringLiteral") {
+        text = valueNode.value;
+      } else if (valueNode.type === "TemplateLiteral") {
+        const info = buildTemplateLiteralText(
+          valueNode.quasis,
+          valueNode.expressions,
+        );
+        if (info) {
+          text = info.text;
+          templateInfo = {
+            placeholders: info.placeholders,
+            expressions: valueNode.expressions,
+          };
+        }
+      }
+
       if (!text || !(text in textToKey)) return;
 
       const key = textToKey[text];
-      path.node.value = t.callExpression(t.identifier("t"), [
-        t.stringLiteral(key),
-      ]);
+      const args: t.Expression[] = [t.stringLiteral(key)];
+      if (templateInfo && templateInfo.placeholders.length > 0) {
+        args.push(buildValuesObject(templateInfo.expressions, templateInfo.placeholders));
+      }
+      path.node.value = t.callExpression(t.identifier("t"), args);
       stringsWrapped++;
 
       componentsNeedingT.add(compName);

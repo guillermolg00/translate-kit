@@ -21,11 +21,42 @@ import {
   getComponentName,
   getParentTagName,
 } from "../utils/ast-helpers.js";
+import { buildTemplateLiteralText } from "../utils/template-literal.js";
 import type { ExtractedString } from "../types.js";
+import type { Expression, ConditionalExpression } from "@babel/types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type TraverseFn = (ast: File, opts: Record<string, any>) => void;
 const traverse = resolveDefault(_traverse) as unknown as TraverseFn;
+
+function extractTextFromNode(node: Expression): string | null {
+  if (node.type === "StringLiteral") {
+    const trimmed = node.value.trim();
+    return trimmed || null;
+  }
+  if (node.type === "TemplateLiteral") {
+    const info = buildTemplateLiteralText(node.quasis, node.expressions);
+    return info ? info.text : null;
+  }
+  return null;
+}
+
+function collectConditionalTexts(node: ConditionalExpression): string[] {
+  const texts: string[] = [];
+
+  for (const branch of [node.consequent, node.alternate]) {
+    if (branch.type === "ConditionalExpression") {
+      texts.push(...collectConditionalTexts(branch));
+    } else {
+      const text = extractTextFromNode(branch as Expression);
+      if (text && !shouldIgnore(text)) {
+        texts.push(text);
+      }
+    }
+  }
+
+  return texts;
+}
 
 export function extractStrings(
   ast: File,
@@ -69,11 +100,34 @@ export function extractStrings(
 
       if (value.type === "StringLiteral") {
         text = value.value;
-      } else if (
-        value.type === "JSXExpressionContainer" &&
-        value.expression.type === "StringLiteral"
-      ) {
-        text = value.expression.value;
+      } else if (value.type === "JSXExpressionContainer") {
+        if (value.expression.type === "StringLiteral") {
+          text = value.expression.value;
+        } else if (value.expression.type === "TemplateLiteral") {
+          const info = buildTemplateLiteralText(
+            value.expression.quasis,
+            value.expression.expressions,
+          );
+          if (info) text = info.text;
+        } else if (value.expression.type === "ConditionalExpression") {
+          const parentTag = getParentTagName(path);
+          if (parentTag && isIgnoredTag(parentTag)) return;
+
+          const texts = collectConditionalTexts(value.expression);
+          for (const t of texts) {
+            results.push({
+              text: t,
+              type: "jsx-attribute",
+              file: filePath,
+              line: path.node.loc?.start.line ?? 0,
+              column: path.node.loc?.start.column ?? 0,
+              componentName: getComponentName(path),
+              propName,
+              parentTag,
+            });
+          }
+          return;
+        }
       }
 
       if (!text || shouldIgnore(text)) return;
@@ -94,13 +148,39 @@ export function extractStrings(
     },
 
     JSXExpressionContainer(path: NodePath<JSXExpressionContainer>) {
-      const expr = path.node.expression;
-      if (expr.type !== "StringLiteral") return;
-
-      const text = expr.value.trim();
-      if (shouldIgnore(text)) return;
-
       if (path.parent.type === "JSXAttribute") return;
+
+      const expr = path.node.expression;
+
+      if (expr.type === "ConditionalExpression") {
+        const parentTag = getParentTagName(path);
+        if (parentTag && isIgnoredTag(parentTag)) return;
+
+        const texts = collectConditionalTexts(expr);
+        for (const t of texts) {
+          results.push({
+            text: t,
+            type: "jsx-expression",
+            file: filePath,
+            line: path.node.loc?.start.line ?? 0,
+            column: path.node.loc?.start.column ?? 0,
+            componentName: getComponentName(path),
+            parentTag,
+          });
+        }
+        return;
+      }
+
+      let text: string | undefined;
+
+      if (expr.type === "StringLiteral") {
+        text = expr.value.trim();
+      } else if (expr.type === "TemplateLiteral") {
+        const info = buildTemplateLiteralText(expr.quasis, expr.expressions);
+        if (info) text = info.text;
+      }
+
+      if (!text || shouldIgnore(text)) return;
 
       const parentTag = getParentTagName(path);
       if (parentTag && isIgnoredTag(parentTag)) return;
@@ -128,10 +208,36 @@ export function extractStrings(
       if (!isContentProperty(propName)) return;
 
       const valueNode = path.node.value;
-      if (valueNode.type !== "StringLiteral") return;
 
-      const text = valueNode.value.trim();
-      if (shouldIgnore(text)) return;
+      if (valueNode.type === "ConditionalExpression") {
+        const texts = collectConditionalTexts(valueNode);
+        for (const t of texts) {
+          results.push({
+            text: t,
+            type: "object-property",
+            file: filePath,
+            line: valueNode.loc?.start.line ?? 0,
+            column: valueNode.loc?.start.column ?? 0,
+            componentName: getComponentName(path),
+            propName,
+            ...(moduleLevel ? { moduleLevel: true } : {}),
+          });
+        }
+        return;
+      }
+
+      let text: string | undefined;
+      if (valueNode.type === "StringLiteral") {
+        text = valueNode.value.trim();
+      } else if (valueNode.type === "TemplateLiteral") {
+        const info = buildTemplateLiteralText(
+          valueNode.quasis,
+          valueNode.expressions,
+        );
+        if (info) text = info.text;
+      }
+
+      if (!text || shouldIgnore(text)) return;
 
       results.push({
         text,
