@@ -16,9 +16,10 @@ export function T({ id, children }: { id?: string; children: ReactNode }) {
 
 export function useT() {
   const msgs = useContext(I18nCtx);
-  return (text: string, id?: string): string => {
-    if (!id) return text;
-    return msgs[id] ?? text;
+  return (text: string, id?: string, values?: Record<string, string | number>): string => {
+    const raw = id ? (msgs[id] ?? text) : text;
+    if (!values) return raw;
+    return raw.replace(/\\{(\\w+)\\}/g, (_, k) => String(values[k] ?? \`{\${k}}\`));
   };
 }
 `;
@@ -45,9 +46,10 @@ export function T({ id, children, messages }: { id?: string; children: ReactNode
 
 export function createT(messages?: Messages) {
   const msgs = messages ?? getMessageStore().current;
-  return (text: string, id?: string): string => {
-    if (!id) return text;
-    return msgs[id] ?? text;
+  return (text: string, id?: string, values?: Record<string, string | number>): string => {
+    const raw = id ? (msgs[id] ?? text) : text;
+    if (!values) return raw;
+    return raw.replace(/\\{(\\w+)\\}/g, (_, k) => String(values[k] ?? \`{\${k}}\`));
   };
 }
 `;

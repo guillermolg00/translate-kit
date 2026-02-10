@@ -529,6 +529,139 @@ describe("codegen transform (conditional expressions, keys mode)", () => {
   });
 });
 
+describe("codegen transform (template literals + conditionals, inline mode)", () => {
+  const inlineOpts: TransformOptions = {
+    mode: "inline",
+    componentPath: "@/components/t",
+  };
+
+  it("transforms template literal in JSX attribute → t(text, key, { vars })", () => {
+    const code = "function App({ type }) { return <input placeholder={`Search ${type}`} />; }";
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Search {type}": "common.searchType" };
+    const result = transform(ast, map, inlineOpts);
+
+    expect(result.modified).toBe(true);
+    expect(result.stringsWrapped).toBe(1);
+    expect(result.code).toContain('t("Search {type}", "common.searchType"');
+    expect(result.code).toMatch(/t\("Search \{type\}", "common\.searchType",\s*\{\s*type\s*\}\)/);
+  });
+
+  it("transforms template literal in JSX expression → t(text, key, { vars })", () => {
+    const code = "function Greeting({ name }) { return <p>{`Hello ${name}`}</p>; }";
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Hello {name}": "greeting.hello" };
+    const result = transform(ast, map, inlineOpts);
+
+    expect(result.modified).toBe(true);
+    expect(result.stringsWrapped).toBe(1);
+    expect(result.code).toContain('t("Hello {name}", "greeting.hello"');
+    expect(result.code).toMatch(/t\("Hello \{name\}", "greeting\.hello",\s*\{\s*name\s*\}\)/);
+  });
+
+  it("transforms template literal in object property → t(text, key, { vars })", () => {
+    const code = `function App({ id }) {
+      const item = { title: \`Task \${id}\` };
+      return <div />;
+    }`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Task {id}": "task.title" };
+    const result = transform(ast, map, inlineOpts);
+
+    expect(result.modified).toBe(true);
+    expect(result.stringsWrapped).toBe(1);
+    expect(result.code).toContain('t("Task {id}", "task.title"');
+    expect(result.code).toMatch(/t\("Task \{id\}", "task\.title",\s*\{\s*id\s*\}\)/);
+  });
+
+  it("transforms plain template literal without values arg", () => {
+    const code = "function App() { return <p>{`Hello world`}</p>; }";
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Hello world": "greeting.helloWorld" };
+    const result = transform(ast, map, inlineOpts);
+
+    expect(result.modified).toBe(true);
+    expect(result.stringsWrapped).toBe(1);
+    expect(result.code).toContain('t("Hello world", "greeting.helloWorld")');
+    expect(result.code).not.toContain("{})");
+  });
+
+  it("transforms ternary in JSX expression", () => {
+    const code = `function App({ isAdmin }) { return <p>{isAdmin ? "Admin" : "User"}</p>; }`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Admin": "role.admin", "User": "role.user" };
+    const result = transform(ast, map, inlineOpts);
+
+    expect(result.modified).toBe(true);
+    expect(result.stringsWrapped).toBe(2);
+    expect(result.code).toContain('t("Admin", "role.admin")');
+    expect(result.code).toContain('t("User", "role.user")');
+    expect(result.code).toMatch(/isAdmin\s*\?\s*t\("Admin", "role\.admin"\)\s*:\s*t\("User", "role\.user"\)/);
+  });
+
+  it("transforms ternary in JSX attribute", () => {
+    const code = `function App({ a }) { return <input placeholder={a ? "X" : "Y"} />; }`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { "X": "key.x", "Y": "key.y" };
+    const result = transform(ast, map, inlineOpts);
+
+    expect(result.modified).toBe(true);
+    expect(result.stringsWrapped).toBe(2);
+    expect(result.code).toContain('t("X", "key.x")');
+    expect(result.code).toContain('t("Y", "key.y")');
+  });
+
+  it("transforms ternary in object property", () => {
+    const code = `function App({ a }) {
+      const item = { title: a ? "Admin" : "User" };
+      return <div />;
+    }`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Admin": "role.admin", "User": "role.user" };
+    const result = transform(ast, map, inlineOpts);
+
+    expect(result.modified).toBe(true);
+    expect(result.stringsWrapped).toBe(2);
+    expect(result.code).toContain('t("Admin", "role.admin")');
+    expect(result.code).toContain('t("User", "role.user")');
+  });
+
+  it("transforms ternary with template literal branch", () => {
+    const code = "function App({ a, n }) { return <p>{a ? `Hi ${n}` : \"Guest\"}</p>; }";
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Hi {n}": "greeting.hi", "Guest": "greeting.guest" };
+    const result = transform(ast, map, inlineOpts);
+
+    expect(result.modified).toBe(true);
+    expect(result.stringsWrapped).toBe(2);
+    expect(result.code).toContain('t("Hi {n}", "greeting.hi"');
+    expect(result.code).toContain('t("Guest", "greeting.guest")');
+    expect(result.code).toMatch(/\{\s*n\s*\}/);
+  });
+
+  it("transforms only mapped branch in mixed ternary", () => {
+    const code = `function App({ isAdmin, role }) { return <p>{isAdmin ? "Admin" : role}</p>; }`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Admin": "role.admin" };
+    const result = transform(ast, map, inlineOpts);
+
+    expect(result.modified).toBe(true);
+    expect(result.stringsWrapped).toBe(1);
+    expect(result.code).toContain('t("Admin", "role.admin")');
+    expect(result.code).toMatch(/isAdmin\s*\?\s*t\("Admin", "role\.admin"\)\s*:\s*role/);
+  });
+
+  it("leaves unmapped template literal and ternary intact", () => {
+    const code = "function App({ name }) { return <p>{`Hello ${name}`}</p>; }";
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, {}, inlineOpts);
+
+    expect(result.modified).toBe(false);
+    expect(result.stringsWrapped).toBe(0);
+    expect(result.code).toContain("`Hello ${name}`");
+  });
+});
+
 describe("AST validation post-codegen", () => {
   it("valid transformed code can be re-parsed (keys mode)", () => {
     const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
