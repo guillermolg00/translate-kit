@@ -758,17 +758,6 @@ export async function runInitWizard(): Promise<void> {
     `Codegen... ${codegenResult.stringsWrapped} strings wrapped in ${codegenResult.filesModified} files`,
   );
 
-  const moduleLevelStrings = transformableStrings.filter((s) => s.moduleLevel);
-  if (moduleLevelStrings.length > 0) {
-    p.log.warn(
-      `${moduleLevelStrings.length} module-level string(s) need manual resolution (codegen cannot auto-transform them):\n` +
-        moduleLevelStrings
-          .map((s) => `  "${s.text}" (${s.propName ?? "unknown"}, ${s.file}:${s.line})`)
-          .join("\n") +
-        "\n  Tip: move these into a helper like getItems(t) so t() is available at call site.",
-    );
-  }
-
   const postScan = await scan(scanOptions, cwd, {
     onProgress: (c, t) => { s3.message(`Validating... ${c}/${t} files`); },
   });

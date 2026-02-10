@@ -62,7 +62,6 @@ export interface ExtractedString {
   siblingTexts?: string[];
   routePath?: string;
   sectionHeading?: string;
-  moduleLevel?: boolean;
 }
 
 export interface TranslationResult {

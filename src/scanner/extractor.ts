@@ -197,7 +197,7 @@ export function extractStrings(
     },
 
     ObjectProperty(path: NodePath<ObjectProperty>) {
-      const moduleLevel = !isInsideFunction(path);
+      if (!isInsideFunction(path)) return; // skip module-level, codegen can't transform these
 
       const keyNode = path.node.key;
       if (keyNode.type !== "Identifier" && keyNode.type !== "StringLiteral")
@@ -220,7 +220,6 @@ export function extractStrings(
             column: valueNode.loc?.start.column ?? 0,
             componentName: getComponentName(path),
             propName,
-            ...(moduleLevel ? { moduleLevel: true } : {}),
           });
         }
         return;
@@ -247,7 +246,6 @@ export function extractStrings(
         column: valueNode.loc?.start.column ?? 0,
         componentName: getComponentName(path),
         propName,
-        ...(moduleLevel ? { moduleLevel: true } : {}),
       });
     },
 

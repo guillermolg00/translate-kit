@@ -379,7 +379,7 @@ describe("extractor", () => {
   });
 
   describe("module-level object properties", () => {
-    it("extracts module-level object properties with moduleLevel: true", () => {
+    it("does not extract module-level object properties", () => {
       const code = `
         const DEFAULT_VIEWS = [
           { title: "My Tasks", description: "View your tasks" },
@@ -390,10 +390,7 @@ describe("extractor", () => {
       const strings = extractStrings(ast, "test.tsx");
 
       const objProps = strings.filter((s) => s.type === "object-property");
-      expect(objProps).toHaveLength(2);
-      for (const prop of objProps) {
-        expect(prop.moduleLevel).toBe(true);
-      }
+      expect(objProps).toHaveLength(0);
     });
 
     it("does not extract non-content properties at module level", () => {
@@ -420,15 +417,8 @@ describe("extractor", () => {
       const strings = extractStrings(ast, "test.tsx");
 
       const objProps = strings.filter((s) => s.type === "object-property");
-      expect(objProps).toHaveLength(2);
-
-      const moduleProps = objProps.filter((s) => s.moduleLevel);
-      expect(moduleProps).toHaveLength(1);
-      expect(moduleProps[0].text).toBe("Module Title");
-
-      const functionProps = objProps.filter((s) => !s.moduleLevel);
-      expect(functionProps).toHaveLength(1);
-      expect(functionProps[0].text).toBe("Function Title");
+      expect(objProps).toHaveLength(1);
+      expect(objProps[0].text).toBe("Function Title");
     });
   });
 });

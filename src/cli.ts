@@ -290,25 +290,9 @@ const scanCommand = defineCommand({
     logScanResult(bareStrings.length, result.fileCount);
 
     if (args["dry-run"]) {
-      const functionLevel = bareStrings.filter((s) => !s.moduleLevel);
-      const moduleLevelStrings = bareStrings.filter((s) => s.moduleLevel);
-
-      for (const str of functionLevel) {
+      for (const str of bareStrings) {
         logInfo(
           `"${str.text}" (${str.componentName ?? "unknown"}, ${str.file})`,
-        );
-      }
-      if (moduleLevelStrings.length > 0) {
-        logWarning(
-          `\n  ${moduleLevelStrings.length} module-level string(s) found (cannot be auto-transformed by codegen):`,
-        );
-        for (const str of moduleLevelStrings) {
-          logInfo(
-            `  "${str.text}" (${str.propName ?? "unknown"}, ${str.file}:${str.line})`,
-          );
-        }
-        logInfo(
-          "  Tip: move these into a helper like getItems(t) so t() is available at call site.",
         );
       }
       if (mode === "inline") {
@@ -358,21 +342,6 @@ const scanCommand = defineCommand({
     logSuccess(
       `Written .translate-map.json (${Object.keys(textToKey).length} keys)`,
     );
-
-    const moduleLevelStrings = bareStrings.filter((s) => s.moduleLevel);
-    if (moduleLevelStrings.length > 0) {
-      logWarning(
-        `${moduleLevelStrings.length} module-level string(s) need manual resolution (codegen cannot auto-transform them):`,
-      );
-      for (const str of moduleLevelStrings) {
-        logInfo(
-          `  "${str.text}" (${str.propName ?? "unknown"}, ${str.file}:${str.line})`,
-        );
-      }
-      logInfo(
-        "  Tip: move these into a helper like getItems(t) so t() is available at call site.",
-      );
-    }
 
     if (mode === "inline") {
       logInfo(
