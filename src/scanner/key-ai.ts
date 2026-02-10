@@ -141,8 +141,16 @@ export async function generateSemanticKeys(
     onUsage,
   } = input;
 
-  const newStrings = strings.filter((s) => !(s.text in existingMap));
-  if (newStrings.length === 0) return { ...existingMap };
+  const activeTexts = new Set(strings.map((s) => s.text));
+  const activeExisting: Record<string, string> = {};
+  for (const [text, key] of Object.entries(existingMap)) {
+    if (activeTexts.has(text)) {
+      activeExisting[text] = key;
+    }
+  }
+
+  const newStrings = strings.filter((s) => !(s.text in activeExisting));
+  if (newStrings.length === 0) return activeExisting;
 
   const uniqueMap = new Map<string, ExtractedString>();
   for (const str of newStrings) {
@@ -181,7 +189,7 @@ export async function generateSemanticKeys(
     onUsage?.({ inputTokens: totalInputTokens, outputTokens: totalOutputTokens });
   }
 
-  const resolved = resolveCollisions(allNewKeys, existingMap);
+  const resolved = resolveCollisions(allNewKeys, activeExisting);
 
-  return { ...existingMap, ...resolved };
+  return { ...activeExisting, ...resolved };
 }

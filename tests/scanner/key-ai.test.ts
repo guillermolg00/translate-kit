@@ -133,6 +133,32 @@ describe("generateSemanticKeys", () => {
     expect(result).toEqual(existingMap);
   });
 
+  it("prunes keys from existingMap when text is no longer in strings", async () => {
+    const existingMap = {
+      "Sign in": "auth.signIn",
+      "Welcome to our platform": "hero.welcome",
+      "Old removed text": "old.removedText",
+      "Another removed": "another.removed",
+    };
+
+    // Only "Sign in" and "Welcome" are still in code
+    const currentStrings = mockStrings.slice(0, 2);
+
+    const result = await generateSemanticKeys({
+      model: mockModel,
+      strings: currentStrings,
+      existingMap,
+    });
+
+    // No new strings → AI should not be called
+    expect(generateObject).not.toHaveBeenCalled();
+    expect(result["Sign in"]).toBe("auth.signIn");
+    expect(result["Welcome to our platform"]).toBe("hero.welcome");
+    expect(result["Old removed text"]).toBeUndefined();
+    expect(result["Another removed"]).toBeUndefined();
+    expect(Object.keys(result)).toHaveLength(2);
+  });
+
   it("resolves key collisions with numeric suffix", async () => {
     const existingMap = {
       "Sign in": "auth.signIn",
