@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { CLIScroll } from "./components/cli-scroll";
+import { InstallCommand } from "./components/install-command";
 
 export default function HomePage() {
   return (
@@ -36,9 +37,15 @@ export default function HomePage() {
             GitHub
           </a>
         </div>
-        <p className="mt-8 text-xs text-fd-muted-foreground/60">
-          Works with next-intl &middot; Powered by Vercel AI SDK
-        </p>
+        <InstallCommand />
+        <div className="mt-8 flex flex-col items-center gap-2">
+          <p className="rounded-lg border border-yellow-500/20 bg-yellow-500/10 px-4 py-2 text-xs text-yellow-600 dark:text-yellow-400">
+            ⚠️ Work in progress — Beta release. Issues and contributions welcome!
+          </p>
+          <p className="text-xs text-fd-muted-foreground/60">
+            Works with next-intl &middot; Powered by Vercel AI SDK
+          </p>
+        </div>
         <div className="mt-12 animate-bounce text-fd-muted-foreground">
           <svg
             width="20"
