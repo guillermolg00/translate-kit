@@ -166,7 +166,7 @@ function TerminalChrome({ children }: { children: ReactNode }) {
 function AnimatedTerminal({ activeStep }: { activeStep: number }) {
   return (
     <TerminalChrome>
-      <div className="relative h-[280px]">
+      <div className="relative h-[400px]">
         {steps.map((step, i) => (
           <div
             key={step.id}
