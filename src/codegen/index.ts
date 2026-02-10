@@ -144,7 +144,7 @@ function resolveLocalImport(
   return null;
 }
 
-function buildInlineClientGraph(
+function buildClientGraph(
   entries: ParsedFileEntry[],
   cwd: string,
 ): Set<string> {
@@ -211,8 +211,7 @@ export async function codegen(
             filePath,
             code,
             ast,
-            isClientRoot:
-              options.mode === "inline" ? detectClientFile(ast) : false,
+            isClientRoot: detectClientFile(ast),
           };
         } catch (err) {
           return {
@@ -226,10 +225,7 @@ export async function codegen(
     ),
   );
 
-  const forceClientSet =
-    options.mode === "inline"
-      ? buildInlineClientGraph(parsedEntries, cwd)
-      : new Set<string>();
+  const forceClientSet = buildClientGraph(parsedEntries, cwd);
 
   const limit = pLimit(10);
   let completed = 0;
@@ -246,13 +242,10 @@ export async function codegen(
           return { modified: false, wrapped: 0, skipped: false };
         }
 
-        const fileTransformOpts: TransformOptions =
-          options.mode === "inline"
-            ? {
-                ...transformOpts,
-                forceClient: forceClientSet.has(entry.filePath),
-              }
-            : transformOpts;
+        const fileTransformOpts: TransformOptions = {
+          ...transformOpts,
+          forceClient: forceClientSet.has(entry.filePath),
+        };
 
         const result = transform(
           entry.ast,

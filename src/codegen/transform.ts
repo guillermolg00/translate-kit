@@ -81,6 +81,26 @@ function hasUseTranslationsImport(ast: File, importSource: string): boolean {
   return false;
 }
 
+function hasGetTranslationsImport(ast: File, importSource: string): boolean {
+  for (const node of ast.program.body) {
+    if (
+      node.type === "ImportDeclaration" &&
+      node.source.value === importSource
+    ) {
+      for (const spec of node.specifiers) {
+        if (
+          spec.type === "ImportSpecifier" &&
+          spec.imported.type === "Identifier" &&
+          spec.imported.name === "getTranslations"
+        ) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 function transformConditionalBranch(
   node: t.Expression,
   textToKey: Record<string, string>,
@@ -203,6 +223,9 @@ export function transform(
   }
 
   const importSource = options.i18nImport ?? "next-intl";
+  const supportsServerSplit = importSource === "next-intl";
+  const isClient =
+    !supportsServerSplit || options.forceClient || detectClientFile(ast);
   let stringsWrapped = 0;
   const componentsNeedingT = new Set<string>();
 
@@ -425,50 +448,100 @@ export function transform(
     return { code: generate(ast).code, stringsWrapped: 0, modified: false };
   }
 
-  if (!hasUseTranslationsImport(ast, importSource)) {
-    const importDecl = t.importDeclaration(
-      [
-        t.importSpecifier(
-          t.identifier("useTranslations"),
-          t.identifier("useTranslations"),
-        ),
-      ],
-      t.stringLiteral(importSource),
-    );
+  if (isClient) {
+    if (!hasUseTranslationsImport(ast, importSource)) {
+      const importDecl = t.importDeclaration(
+        [
+          t.importSpecifier(
+            t.identifier("useTranslations"),
+            t.identifier("useTranslations"),
+          ),
+        ],
+        t.stringLiteral(importSource),
+      );
 
-    const lastImportIndex = findLastImportIndex(ast);
-    if (lastImportIndex >= 0) {
-      ast.program.body.splice(lastImportIndex + 1, 0, importDecl);
-    } else {
-      ast.program.body.unshift(importDecl);
-    }
-  }
-
-  traverse(ast, {
-    FunctionDeclaration(path: NodePath<t.FunctionDeclaration>) {
-      const name = path.node.id?.name;
-      if (!name || !componentsNeedingT.has(name)) return;
-      injectTDeclaration(path);
-    },
-    VariableDeclarator(path: NodePath<t.VariableDeclarator>) {
-      if (path.node.id.type !== "Identifier") return;
-      const name = path.node.id.name;
-      if (!componentsNeedingT.has(name)) return;
-
-      const init = path.node.init;
-      if (!init) return;
-
-      if (
-        init.type === "ArrowFunctionExpression" ||
-        init.type === "FunctionExpression"
-      ) {
-        if (init.body.type === "BlockStatement") {
-          injectTIntoBlock(init.body);
-        }
+      const lastImportIndex = findLastImportIndex(ast);
+      if (lastImportIndex >= 0) {
+        ast.program.body.splice(lastImportIndex + 1, 0, importDecl);
+      } else {
+        ast.program.body.unshift(importDecl);
       }
-    },
-    noScope: true,
-  });
+    }
+
+    traverse(ast, {
+      FunctionDeclaration(path: NodePath<t.FunctionDeclaration>) {
+        const name = path.node.id?.name;
+        if (!name || !componentsNeedingT.has(name)) return;
+        injectTDeclaration(path);
+      },
+      VariableDeclarator(path: NodePath<t.VariableDeclarator>) {
+        if (path.node.id.type !== "Identifier") return;
+        const name = path.node.id.name;
+        if (!componentsNeedingT.has(name)) return;
+
+        const init = path.node.init;
+        if (!init) return;
+
+        if (
+          init.type === "ArrowFunctionExpression" ||
+          init.type === "FunctionExpression"
+        ) {
+          if (init.body.type === "BlockStatement") {
+            injectTIntoBlock(init.body);
+          }
+        }
+      },
+      noScope: true,
+    });
+  } else {
+    const serverSource = `${importSource}/server`;
+    if (!hasGetTranslationsImport(ast, serverSource)) {
+      const importDecl = t.importDeclaration(
+        [
+          t.importSpecifier(
+            t.identifier("getTranslations"),
+            t.identifier("getTranslations"),
+          ),
+        ],
+        t.stringLiteral(serverSource),
+      );
+
+      const lastImportIndex = findLastImportIndex(ast);
+      if (lastImportIndex >= 0) {
+        ast.program.body.splice(lastImportIndex + 1, 0, importDecl);
+      } else {
+        ast.program.body.unshift(importDecl);
+      }
+    }
+
+    traverse(ast, {
+      FunctionDeclaration(path: NodePath<t.FunctionDeclaration>) {
+        const name = path.node.id?.name;
+        if (!name || !componentsNeedingT.has(name)) return;
+        path.node.async = true;
+        injectAsyncTIntoBlock(path.node.body);
+      },
+      VariableDeclarator(path: NodePath<t.VariableDeclarator>) {
+        if (path.node.id.type !== "Identifier") return;
+        const name = path.node.id.name;
+        if (!componentsNeedingT.has(name)) return;
+
+        const init = path.node.init;
+        if (!init) return;
+
+        if (
+          init.type === "ArrowFunctionExpression" ||
+          init.type === "FunctionExpression"
+        ) {
+          init.async = true;
+          if (init.body.type === "BlockStatement") {
+            injectAsyncTIntoBlock(init.body);
+          }
+        }
+      },
+      noScope: true,
+    });
+  }
 
   const output = generate(ast, { retainLines: false });
   return { code: output.code, stringsWrapped, modified: true };
@@ -488,9 +561,14 @@ function injectTIntoBlock(block: t.BlockStatement): void {
         (d) =>
           d.id.type === "Identifier" &&
           d.id.name === "t" &&
-          d.init?.type === "CallExpression" &&
-          d.init.callee.type === "Identifier" &&
-          d.init.callee.name === "useTranslations",
+          ((d.init?.type === "CallExpression" &&
+            d.init.callee.type === "Identifier" &&
+            (d.init.callee.name === "useTranslations" ||
+              d.init.callee.name === "getTranslations")) ||
+            (d.init?.type === "AwaitExpression" &&
+              d.init.argument.type === "CallExpression" &&
+              d.init.argument.callee.type === "Identifier" &&
+              d.init.argument.callee.name === "getTranslations")),
       )
     ) {
       return;
@@ -501,6 +579,39 @@ function injectTIntoBlock(block: t.BlockStatement): void {
     t.variableDeclarator(
       t.identifier("t"),
       t.callExpression(t.identifier("useTranslations"), []),
+    ),
+  ]);
+
+  block.body.unshift(tDecl);
+}
+
+function injectAsyncTIntoBlock(block: t.BlockStatement): void {
+  for (const stmt of block.body) {
+    if (
+      stmt.type === "VariableDeclaration" &&
+      stmt.declarations.some(
+        (d) =>
+          d.id.type === "Identifier" &&
+          d.id.name === "t" &&
+          ((d.init?.type === "AwaitExpression" &&
+            d.init.argument.type === "CallExpression" &&
+            d.init.argument.callee.type === "Identifier" &&
+            d.init.argument.callee.name === "getTranslations") ||
+            (d.init?.type === "CallExpression" &&
+              d.init.callee.type === "Identifier" &&
+              d.init.callee.name === "getTranslations")),
+      )
+    ) {
+      return;
+    }
+  }
+
+  const tDecl = t.variableDeclaration("const", [
+    t.variableDeclarator(
+      t.identifier("t"),
+      t.awaitExpression(
+        t.callExpression(t.identifier("getTranslations"), []),
+      ),
     ),
   ]);
 

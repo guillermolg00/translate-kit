@@ -30,22 +30,23 @@ describe("codegen transform", () => {
     expect(result.code).toContain('t("common.searchPlaceholder")');
   });
 
-  it("injects useTranslations import", () => {
+  it("injects getTranslations import for server components", () => {
     const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
     const ast = parseFile(code, "before.tsx");
     const result = transform(ast, textToKey);
 
     expect(result.code).toContain(
-      'import { useTranslations } from "next-intl"',
+      'import { getTranslations } from "next-intl/server"',
     );
   });
 
-  it("injects const t = useTranslations()", () => {
+  it("injects const t = await getTranslations() and async for server components", () => {
     const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
     const ast = parseFile(code, "before.tsx");
     const result = transform(ast, textToKey);
 
-    expect(result.code).toContain("const t = useTranslations()");
+    expect(result.code).toContain("const t = await getTranslations()");
+    expect(result.code).toContain("async");
   });
 
   it("is idempotent - does not double-wrap t() calls", () => {
@@ -185,7 +186,7 @@ describe("codegen transform", () => {
     expect(result.code).toContain('title: "Project Management"');
   });
 
-  it("injects t into each component that needs it in multi-component files", () => {
+  it("injects t into each component that needs it in multi-component server files", () => {
     const code = `function Header() {
   return <h1>Welcome to our platform</h1>;
 }
@@ -197,10 +198,10 @@ function Footer() {
 
     expect(result.stringsWrapped).toBe(2);
     expect(result.code).toMatch(
-      /function Header\(\) \{\s*const t = useTranslations\(\)/,
+      /async function Header\(\) \{\s*const t = await getTranslations\(\)/,
     );
     expect(result.code).toMatch(
-      /function Footer\(\) \{\s*const t = useTranslations\(\)/,
+      /async function Footer\(\) \{\s*const t = await getTranslations\(\)/,
     );
   });
 
@@ -229,6 +230,86 @@ function Footer() {
       headerMatches?.[0].match(/useTranslations\(\)/g) || []
     ).length;
     expect(headerTCount).toBe(1);
+  });
+
+  it("uses useTranslations for client components with 'use client' directive", () => {
+    const code = `"use client";\nexport default function Hero() { return <h1>Welcome to our platform</h1>; }`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, textToKey);
+
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain(
+      'import { useTranslations } from "next-intl"',
+    );
+    expect(result.code).toContain("const t = useTranslations()");
+    expect(result.code).not.toContain("getTranslations");
+  });
+
+  it("detects components with hooks as client and uses useTranslations", () => {
+    const code = `import { useState } from "react";
+export default function Counter() {
+  const [count, setCount] = useState(0);
+  return <p>Welcome to our platform</p>;
+}`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, textToKey);
+
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain(
+      'import { useTranslations } from "next-intl"',
+    );
+    expect(result.code).toContain("const t = useTranslations()");
+    expect(result.code).not.toContain("getTranslations");
+  });
+
+  it("forceClient: true forces useTranslations even for server components", () => {
+    const code = `export default function Hero() { return <h1>Welcome to our platform</h1>; }`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, textToKey, { forceClient: true });
+
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain(
+      'import { useTranslations } from "next-intl"',
+    );
+    expect(result.code).toContain("const t = useTranslations()");
+    expect(result.code).not.toContain("getTranslations");
+  });
+
+  it("makes arrow function server components async with await getTranslations", () => {
+    const code = `const Hero = () => { return <h1>Welcome to our platform</h1>; };`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, textToKey);
+
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain(
+      'import { getTranslations } from "next-intl/server"',
+    );
+    expect(result.code).toContain("const t = await getTranslations()");
+    expect(result.code).toMatch(/async \(\) =>/);
+  });
+
+  it("preserves already async server components", () => {
+    const code = `export default async function Page() { return <h1>Welcome to our platform</h1>; }`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, textToKey);
+
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain("async function Page");
+    expect(result.code).toContain("const t = await getTranslations()");
+  });
+
+  it("custom i18nImport does not apply server/client split", () => {
+    const code = `export default function Hero() { return <h1>Welcome to our platform</h1>; }`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, textToKey, {
+      i18nImport: "my-i18n-lib",
+    });
+
+    expect(result.code).toContain(
+      'import { useTranslations } from "my-i18n-lib"',
+    );
+    expect(result.code).toContain("const t = useTranslations()");
+    expect(result.code).not.toContain("getTranslations");
   });
 
   it("does not wrap module-level object properties like metadata", () => {
