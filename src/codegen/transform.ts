@@ -68,24 +68,6 @@ function hasUseTranslationsImport(ast: File, importSource: string): boolean {
   return false;
 }
 
-function hasUseTranslationsCall(ast: File): boolean {
-  let found = false;
-  traverse(ast, {
-    VariableDeclarator(path: NodePath<t.VariableDeclarator>) {
-      const init = path.node.init;
-      if (
-        init?.type === "CallExpression" &&
-        init.callee.type === "Identifier" &&
-        init.callee.name === "useTranslations"
-      ) {
-        found = true;
-        path.stop();
-      }
-    },
-    noScope: true,
-  });
-  return found;
-}
 
 export function transform(
   ast: File,
@@ -229,33 +211,31 @@ export function transform(
     }
   }
 
-  if (!hasUseTranslationsCall(ast)) {
-    traverse(ast, {
-      FunctionDeclaration(path: NodePath<t.FunctionDeclaration>) {
-        const name = path.node.id?.name;
-        if (!name || !componentsNeedingT.has(name)) return;
-        injectTDeclaration(path);
-      },
-      VariableDeclarator(path: NodePath<t.VariableDeclarator>) {
-        if (path.node.id.type !== "Identifier") return;
-        const name = path.node.id.name;
-        if (!componentsNeedingT.has(name)) return;
+  traverse(ast, {
+    FunctionDeclaration(path: NodePath<t.FunctionDeclaration>) {
+      const name = path.node.id?.name;
+      if (!name || !componentsNeedingT.has(name)) return;
+      injectTDeclaration(path);
+    },
+    VariableDeclarator(path: NodePath<t.VariableDeclarator>) {
+      if (path.node.id.type !== "Identifier") return;
+      const name = path.node.id.name;
+      if (!componentsNeedingT.has(name)) return;
 
-        const init = path.node.init;
-        if (!init) return;
+      const init = path.node.init;
+      if (!init) return;
 
-        if (
-          init.type === "ArrowFunctionExpression" ||
-          init.type === "FunctionExpression"
-        ) {
-          if (init.body.type === "BlockStatement") {
-            injectTIntoBlock(init.body);
-          }
+      if (
+        init.type === "ArrowFunctionExpression" ||
+        init.type === "FunctionExpression"
+      ) {
+        if (init.body.type === "BlockStatement") {
+          injectTIntoBlock(init.body);
         }
-      },
-      noScope: true,
-    });
-  }
+      }
+    },
+    noScope: true,
+  });
 
   const output = generate(ast, { retainLines: false });
   return { code: output.code, stringsWrapped, modified: true };
@@ -343,24 +323,6 @@ function hasInlineImport(
   return { hasT, hasHook };
 }
 
-function hasInlineHookCall(ast: File, hookName: string): boolean {
-  let found = false;
-  traverse(ast, {
-    VariableDeclarator(path: NodePath<t.VariableDeclarator>) {
-      const init = path.node.init;
-      if (
-        init?.type === "CallExpression" &&
-        init.callee.type === "Identifier" &&
-        init.callee.name === hookName
-      ) {
-        found = true;
-        path.stop();
-      }
-    },
-    noScope: true,
-  });
-  return found;
-}
 
 function transformInline(
   ast: File,
@@ -584,7 +546,7 @@ function transformInline(
     }
   }
 
-  if (needsHook && !hasInlineHookCall(ast, hookName)) {
+  if (needsHook) {
     const hookCall = isClient
       ? t.callExpression(t.identifier("useT"), [])
       : t.callExpression(t.identifier("createT"), []);

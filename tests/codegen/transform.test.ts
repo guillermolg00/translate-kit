@@ -172,6 +172,42 @@ describe("codegen transform", () => {
     expect(result.code).toContain('title: "Project Management"');
   });
 
+  it("injects t into each component that needs it in multi-component files", () => {
+    const code = `function Header() {
+  return <h1>Welcome to our platform</h1>;
+}
+function Footer() {
+  return <p>Sign up now</p>;
+}`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, textToKey);
+
+    expect(result.stringsWrapped).toBe(2);
+    expect(result.code).toMatch(/function Header\(\) \{\s*const t = useTranslations\(\)/);
+    expect(result.code).toMatch(/function Footer\(\) \{\s*const t = useTranslations\(\)/);
+  });
+
+  it("injects t only into components that need it, not pre-existing ones", () => {
+    const code = `import { useTranslations } from "next-intl";
+function Header() {
+  const t = useTranslations();
+  return <h1>{t("existing.key")}</h1>;
+}
+function Footer() {
+  return <p>Sign up now</p>;
+}`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, textToKey);
+
+    expect(result.stringsWrapped).toBe(1);
+    // Footer gets t injected
+    expect(result.code).toMatch(/function Footer\(\) \{\s*const t = useTranslations\(\)/);
+    // Header keeps its existing single t declaration
+    const headerMatches = result.code.match(/function Header[\s\S]*?function Footer/);
+    const headerTCount = (headerMatches?.[0].match(/useTranslations\(\)/g) || []).length;
+    expect(headerTCount).toBe(1);
+  });
+
   it("does not wrap module-level object properties like metadata", () => {
     const code = `
       export const metadata = {
@@ -306,6 +342,21 @@ describe("codegen transform (inline mode)", () => {
     expect(result.stringsWrapped).toBe(0);
     expect(result.modified).toBe(false);
     expect(result.code).toContain('title: "Project Management"');
+  });
+
+  it("injects hook into each component that needs it in multi-component files", () => {
+    const code = `function Header() {
+  return <input placeholder="Search..." />;
+}
+function Footer() {
+  return <input placeholder="Search..." />;
+}`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, textToKey, inlineOpts);
+
+    expect(result.stringsWrapped).toBe(2);
+    expect(result.code).toMatch(/function Header\(\) \{\s*const t = createT\(\)/);
+    expect(result.code).toMatch(/function Footer\(\) \{\s*const t = createT\(\)/);
   });
 
   it("repairs createT(messages) → createT() when messages is not in scope", () => {

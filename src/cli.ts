@@ -151,6 +151,7 @@ const translateCommand = defineCommand({
 
       let translated: Record<string, string> = {};
       let errors = 0;
+      let translationFailed = false;
 
       if (Object.keys(toTranslate).length > 0) {
         try {
@@ -173,10 +174,25 @@ const translateCommand = defineCommand({
         } catch (err) {
           logProgressClear();
           errors = Object.keys(toTranslate).length;
+          translationFailed = true;
           logError(
             `Translation failed for ${locale}: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
+      }
+
+      if (translationFailed) {
+        const result: TranslationResult = {
+          locale,
+          translated: 0,
+          cached: Object.keys(diffResult.unchanged).length,
+          removed: 0,
+          errors,
+          duration: Date.now() - start,
+        };
+        logLocaleResult(result);
+        results.push(result);
+        continue;
       }
 
       const finalFlat: Record<string, string> = {
@@ -469,13 +485,19 @@ const main = defineCommand({
   // Default to translate command
   async run({ rawArgs }) {
     if (rawArgs.length === 0 || rawArgs[0]?.startsWith("-")) {
+      const dryRun = rawArgs.includes("--dry-run");
+      const force = rawArgs.includes("--force");
+      const verbose = rawArgs.includes("--verbose");
+      const localeIdx = rawArgs.indexOf("--locale");
+      const locale = localeIdx !== -1 ? rawArgs[localeIdx + 1] ?? "" : "";
+
       await translateCommand.run!({
         args: {
           _: rawArgs,
-          "dry-run": false,
-          force: false,
-          verbose: false,
-          locale: "",
+          "dry-run": dryRun,
+          force,
+          verbose,
+          locale,
         },
         rawArgs,
         cmd: translateCommand,
