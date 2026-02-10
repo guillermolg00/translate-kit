@@ -52,7 +52,7 @@ const IGNORE_PATTERNS = [
   /^[a-z]+(-[a-z]+)+$/, // kebab-case identifiers
   /^[A-Z_]+$/, // CONSTANT_CASE
   /^[\d.,%$€£¥]+$/, // Numbers, currency
-  /^[^a-zA-Z]*$/, // No letters at all
+  /^[^\p{L}]*$/u, // No letters at all (Unicode-aware)
 ];
 
 const CONTENT_PROPERTY_NAMES = [

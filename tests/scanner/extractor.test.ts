@@ -99,6 +99,24 @@ describe("extractor", () => {
       expect(strings).toHaveLength(0);
     });
 
+    it("extracts non-Latin text (Japanese, Chinese, Korean, Arabic)", () => {
+      const code = `function App() { return <><h1>こんにちは</h1><p>مرحبا</p><p>안녕하세요</p><p>你好世界</p></>; }`;
+      const ast = parseFile(code, "test.tsx");
+      const strings = extractStrings(ast, "test.tsx");
+      const texts = strings.map((s) => s.text);
+      expect(texts).toContain("こんにちは");
+      expect(texts).toContain("مرحبا");
+      expect(texts).toContain("안녕하세요");
+      expect(texts).toContain("你好世界");
+    });
+
+    it("still ignores strings with no letters (symbols, numbers)", () => {
+      const code = `function App() { return <><p>123.45</p><p>---</p><p>$€£</p></>; }`;
+      const ast = parseFile(code, "test.tsx");
+      const strings = extractStrings(ast, "test.tsx");
+      expect(strings).toHaveLength(0);
+    });
+
     it("ignores script and style tags", () => {
       const code = `function App() { return <><script>code here</script><style>css here</style><p>Real text</p></>; }`;
       const ast = parseFile(code, "test.tsx");
