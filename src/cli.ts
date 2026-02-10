@@ -28,6 +28,7 @@ import {
 import { createUsageTracker, estimateCost, formatUsage, formatCost } from "./usage.js";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import type { TranslationResult } from "./types.js";
+import { parseTranslateFlags, validateLocale } from "./cli-utils.js";
 
 async function loadMapFile(
   messagesDir: string,
@@ -92,7 +93,7 @@ const translateCommand = defineCommand({
     const verbose = args.verbose;
     const mode = config.mode ?? "keys";
 
-    if (args.locale && !/^[a-zA-Z0-9_-]+$/.test(args.locale)) {
+    if (args.locale && !validateLocale(args.locale)) {
       logError(
         `Invalid locale "${args.locale}". Locale must only contain letters, numbers, hyphens, and underscores.`,
       );
@@ -500,11 +501,7 @@ const main = defineCommand({
   // Default to translate command
   async run({ rawArgs }) {
     if (rawArgs.length === 0 || rawArgs[0]?.startsWith("-")) {
-      const dryRun = rawArgs.includes("--dry-run");
-      const force = rawArgs.includes("--force");
-      const verbose = rawArgs.includes("--verbose");
-      const localeIdx = rawArgs.indexOf("--locale");
-      const locale = localeIdx !== -1 ? rawArgs[localeIdx + 1] ?? "" : "";
+      const { dryRun, force, verbose, locale } = parseTranslateFlags(rawArgs);
 
       await translateCommand.run!({
         args: {
