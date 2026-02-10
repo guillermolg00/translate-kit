@@ -7,6 +7,7 @@ export interface TranslationOptions {
   tone?: string;
   retries?: number;
   concurrency?: number;
+  validatePlaceholders?: boolean;
 }
 
 export interface ScanOptions {

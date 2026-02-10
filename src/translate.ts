@@ -2,6 +2,8 @@ import { generateObject, type LanguageModel } from "ai";
 import { z } from "zod";
 import pLimit from "p-limit";
 import type { TranslationOptions } from "./types.js";
+import { validateBatch } from "./validate.js";
+import { logWarning } from "./logger.js";
 
 interface TranslateBatchInput {
   model: LanguageModel;
@@ -68,6 +70,7 @@ async function translateBatchWithRetry(
   const prompt = buildPrompt(entries, sourceLocale, targetLocale, options);
   const schema = buildSchema(keys);
 
+  const shouldValidate = options?.validatePlaceholders !== false;
   let lastError: Error | undefined;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -77,6 +80,24 @@ async function translateBatchWithRetry(
         prompt,
         schema,
       });
+
+      if (shouldValidate) {
+        const validation = validateBatch(entries, object);
+        if (!validation.valid) {
+          if (attempt < retries) {
+            logWarning(
+              `Placeholder mismatch in batch (attempt ${attempt + 1}/${retries + 1}), retrying...`,
+            );
+            continue;
+          }
+          for (const failure of validation.failures) {
+            logWarning(
+              `Placeholder mismatch for key "${failure.key}": missing=[${failure.missing.join(", ")}] extra=[${failure.extra.join(", ")}]`,
+            );
+          }
+        }
+      }
+
       return object;
     } catch (error) {
       lastError = error as Error;

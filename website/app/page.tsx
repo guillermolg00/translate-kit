@@ -25,7 +25,7 @@ export default function HomePage() {
             Get Started
           </Link>
           <a
-            href="https://github.com/guillermolg00/translate-kit"
+            href="https://github.com/nicholasgriffintn/translate-kit"
             className="rounded-lg border border-fd-border px-7 py-3.5 text-sm font-medium transition-colors hover:bg-fd-accent"
             target="_blank"
             rel="noopener noreferrer"

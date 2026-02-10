@@ -2,7 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { glob } from "tinyglobby";
 import { parseFile } from "../scanner/parser.js";
 import { transform, type TransformOptions } from "./transform.js";
-import { logVerbose } from "../logger.js";
+import { logVerbose, logWarning } from "../logger.js";
 
 export interface CodegenOptions {
   include: string[];
@@ -17,6 +17,7 @@ export interface CodegenResult {
   filesModified: number;
   stringsWrapped: number;
   filesProcessed: number;
+  filesSkipped: number;
 }
 
 export async function codegen(
@@ -31,6 +32,7 @@ export async function codegen(
 
   let filesModified = 0;
   let stringsWrapped = 0;
+  let filesSkipped = 0;
 
   const transformOpts: TransformOptions = {
     i18nImport: options.i18nImport,
@@ -55,6 +57,16 @@ export async function codegen(
     const result = transform(ast, options.textToKey, transformOpts);
 
     if (result.modified) {
+      try {
+        parseFile(result.code, filePath);
+      } catch {
+        logWarning(
+          `Codegen produced invalid syntax for ${filePath}, file was NOT modified.`,
+        );
+        filesSkipped++;
+        continue;
+      }
+
       await writeFile(filePath, result.code, "utf-8");
       filesModified++;
       stringsWrapped += result.stringsWrapped;
@@ -65,5 +77,6 @@ export async function codegen(
     filesModified,
     stringsWrapped,
     filesProcessed: files.length,
+    filesSkipped,
   };
 }

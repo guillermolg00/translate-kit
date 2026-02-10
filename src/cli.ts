@@ -375,6 +375,11 @@ const codegenCommand = defineCommand({
     logSuccess(
       `Codegen complete: ${result.stringsWrapped} strings wrapped in ${result.filesModified} files (${result.filesProcessed} files processed)`,
     );
+    if (result.filesSkipped > 0) {
+      logWarning(
+        `${result.filesSkipped} file(s) skipped due to invalid generated syntax`,
+      );
+    }
   },
 });
 

@@ -20,6 +20,7 @@ const configSchema = z
         tone: z.string().optional(),
         retries: z.number().int().min(0).default(2),
         concurrency: z.number().int().positive().default(3),
+        validatePlaceholders: z.boolean().default(true).optional(),
       })
       .optional(),
     scan: z

@@ -308,3 +308,47 @@ export default function Logo() {
     expect(result.code).toContain("createT(messages)");
   });
 });
+
+describe("AST validation post-codegen", () => {
+  it("valid transformed code can be re-parsed (keys mode)", () => {
+    const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
+    const ast = parseFile(code, "before.tsx");
+    const result = transform(ast, textToKey);
+
+    expect(result.modified).toBe(true);
+    expect(() => parseFile(result.code, "before.tsx")).not.toThrow();
+  });
+
+  it("valid inline transformed code can be re-parsed", () => {
+    const code = readFileSync(join(fixturesDir, "before-inline.tsx"), "utf-8");
+    const ast = parseFile(code, "before-inline.tsx");
+    const inlineOpts: TransformOptions = {
+      mode: "inline",
+      componentPath: "@/components/t",
+    };
+    const result = transform(ast, textToKey, inlineOpts);
+
+    expect(result.modified).toBe(true);
+    expect(() => parseFile(result.code, "before-inline.tsx")).not.toThrow();
+  });
+
+  it("all fixture transforms produce parseable output", () => {
+    const fixtures = [
+      { file: "before.tsx", opts: undefined },
+      {
+        file: "before-inline.tsx",
+        opts: { mode: "inline" as const, componentPath: "@/components/t" },
+      },
+    ];
+
+    for (const fixture of fixtures) {
+      const code = readFileSync(join(fixturesDir, fixture.file), "utf-8");
+      const ast = parseFile(code, fixture.file);
+      const result = transform(ast, textToKey, fixture.opts);
+
+      if (result.modified) {
+        expect(() => parseFile(result.code, fixture.file)).not.toThrow();
+      }
+    }
+  });
+});
