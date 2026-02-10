@@ -2,12 +2,12 @@ import { describe, it, expect } from "vitest";
 import { parseTranslateFlags, validateLocale } from "../src/cli-utils.js";
 
 describe("parseTranslateFlags", () => {
-  it("returns all false/empty when no flags given", () => {
+  it("returns all false/undefined when no flags given", () => {
     expect(parseTranslateFlags([])).toEqual({
       dryRun: false,
       force: false,
       verbose: false,
-      locale: "",
+      locale: undefined,
     });
   });
 
@@ -34,9 +34,25 @@ describe("parseTranslateFlags", () => {
     expect(result.locale).toBe("es");
   });
 
-  it("parses --locale without value to empty string", () => {
+  it("returns undefined when --locale has no value", () => {
     const result = parseTranslateFlags(["--locale"]);
-    expect(result.locale).toBe("");
+    expect(result.locale).toBeUndefined();
+  });
+
+  it("parses --locale=es format", () => {
+    const result = parseTranslateFlags(["--locale=es"]);
+    expect(result.locale).toBe("es");
+  });
+
+  it("returns undefined for --locale= with empty value", () => {
+    const result = parseTranslateFlags(["--locale="]);
+    expect(result.locale).toBeUndefined();
+  });
+
+  it("returns undefined when --locale is followed by another flag", () => {
+    const result = parseTranslateFlags(["--locale", "--dry-run"]);
+    expect(result.locale).toBeUndefined();
+    expect(result.dryRun).toBe(true);
   });
 
   it("parses multiple flags combined", () => {

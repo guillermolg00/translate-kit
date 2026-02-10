@@ -478,7 +478,7 @@ const main = defineCommand({
           "dry-run": dryRun,
           force,
           verbose,
-          locale,
+          locale: locale ?? "",
         },
         rawArgs,
         cmd: translateCommand,
