@@ -30,9 +30,12 @@ const steps: Step[] = [
     title: "Install",
     description: "One package. That's all you need.",
     lines: [
-      { text: "bun add translate-kit @ai-sdk/openai", type: "command" },
+      {
+        text: "bun add translate-kit @ai-sdk/openai next-intl",
+        type: "command",
+      },
       { text: "", type: "blank" },
-      { text: "installed translate-kit@0.1.0", type: "dim" },
+      { text: "installed translate-kit", type: "dim" },
     ],
   },
   {
@@ -40,18 +43,35 @@ const steps: Step[] = [
     number: "02",
     title: "Configure",
     description:
-      "The interactive wizard sets up everything. Pick your AI provider, set your target languages, done.",
+      "The interactive wizard sets up everything. Pick your AI provider, mode, languages, and optionally runs the full pipeline.",
     lines: [
       { text: "bunx translate-kit init", type: "command" },
       { text: "", type: "blank" },
-      { text: "\u250c  translate-kit", type: "info" },
+      { text: "\u250c  translate-kit setup", type: "info" },
       { text: "\u2502", type: "dim" },
-      { text: "\u25c6  Provider: OpenAI (gpt-4o-mini)", type: "result" },
-      { text: "\u25c6  Source: en", type: "result" },
-      { text: "\u25c6  Target: es, fr, de, ja", type: "result" },
-      { text: "\u25c6  Directory: ./messages", type: "result" },
+      { text: "\u25c7  Translation mode: Inline mode", type: "result" },
+      { text: "\u25c7  AI provider: OpenAI", type: "result" },
+      { text: "\u25c7  Model: gpt-4o-mini", type: "result" },
+      { text: "\u25c7  Source locale: en", type: "result" },
+      { text: "\u25c7  Target locales: Spanish (es)", type: "result" },
+      { text: "\u25c7  Messages directory: ./messages", type: "result" },
+      { text: "\u25c7  Component path: @/components/t", type: "result" },
+      { text: "\u25c7  Tone: Formal", type: "result" },
       { text: "\u2502", type: "dim" },
-      { text: "\u2514  Config created \u2713", type: "success" },
+      { text: "\u25c6  Created translate-kit.config.ts", type: "success" },
+      { text: "\u25c6  Created inline components", type: "success" },
+      { text: "\u25c6  Configured i18n + layout", type: "success" },
+      { text: "\u2502", type: "dim" },
+      { text: "\u25c7  Run full pipeline? Yes", type: "result" },
+      { text: "", type: "blank" },
+      { text: "\u25c7  Scanning... 876 strings from 412 files", type: "dim" },
+      { text: "\u25c7  Generating keys... done", type: "dim" },
+      { text: "\u25c7  Codegen... 763 strings wrapped in 217 files", type: "dim" },
+      { text: "\u25c7  Translating es... done", type: "dim" },
+      { text: "\u2502", type: "dim" },
+      { text: "\u25cf  62,934 in + 15,649 out = 78,583 tokens \u00b7 ~$0.02", type: "info" },
+      { text: "\u2502", type: "dim" },
+      { text: "\u2514  You're all set!", type: "success" },
     ],
   },
   {
@@ -144,8 +164,8 @@ function Line({ line }: { line: TLine }) {
 
 function TerminalChrome({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-xl border border-neutral-800 bg-[#0d1117] shadow-2xl overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-3 bg-[#161b22] border-b border-neutral-800">
+    <div className="rounded-xl border border-neutral-700 bg-neutral-900/40 shadow-2xl overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-3 bg-neutral-800/50  border-b border-neutral-700">
         <div className="h-3 w-3 rounded-full bg-[#ff5f57]" />
         <div className="h-3 w-3 rounded-full bg-[#febc2e]" />
         <div className="h-3 w-3 rounded-full bg-[#28c840]" />
