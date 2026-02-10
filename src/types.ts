@@ -13,7 +13,6 @@ export interface TranslationOptions {
 export interface ScanOptions {
   include: string[];
   exclude?: string[];
-  keyStrategy?: "hash" | "path";
   translatableProps?: string[];
   i18nImport?: string;
 }

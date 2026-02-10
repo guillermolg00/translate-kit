@@ -70,7 +70,6 @@ src/
     extractor.ts      # Babel AST string extraction
     filters.ts        # String filtering rules
     key-ai.ts         # AI-powered key generation
-    key-generator.ts  # Hash/path key strategies
     index.ts          # Scanner orchestrator
   codegen/
     transform.ts      # AST transformation (keys + inline modes)

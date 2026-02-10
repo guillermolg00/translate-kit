@@ -38,7 +38,6 @@ export default defineConfig({
   scan: {
     include: ["src/**/*.tsx", "app/**/*.tsx"],
     exclude: ["**/*.test.*"],
-    keyStrategy: "hash",
     translatableProps: ["placeholder", "title", "alt", "aria-label"],
     i18nImport: "next-intl",
   },
@@ -93,13 +92,7 @@ Required when `mode` is `"inline"`.
 |-------|------|---------|-------------|
 | `include` | `string[]` | — | Glob patterns for files to scan |
 | `exclude` | `string[]` | — | Glob patterns to exclude |
-| `keyStrategy` | `"hash" \| "path"` | `"hash"` | Key generation strategy |
 | `translatableProps` | `string[]` | `["placeholder", "title", "alt", "aria-label"]` | JSX props to extract |
 | `i18nImport` | `string` | `"next-intl"` | i18n library import source |
-
-### Key Strategies
-
-- **`hash`** — generates stable 12-character SHA-256 hashes. Good for large codebases where readability is less important.
-- **`path`** — generates human-readable keys like `ComponentName.parentTag.slug`. More readable but may change if components are renamed.
 
 AI semantic key generation is used automatically during `scan` to produce namespace-style keys like `common.save`, `nav.dashboard`, `form.enterName`.

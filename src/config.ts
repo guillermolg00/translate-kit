@@ -27,7 +27,6 @@ const configSchema = z
       .object({
         include: z.array(z.string()),
         exclude: z.array(z.string()).optional(),
-        keyStrategy: z.enum(["hash", "path"]).default("hash"),
         translatableProps: z
           .array(z.string())
           .default(["placeholder", "title", "alt", "aria-label"]),

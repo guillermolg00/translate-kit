@@ -3,14 +3,12 @@ import { glob } from "tinyglobby";
 import pLimit from "p-limit";
 import { parseFile } from "./parser.js";
 import { extractStrings } from "./extractor.js";
-import { generateKey } from "./key-generator.js";
 import { enrichStrings } from "./context-enricher.js";
 import { logVerbose } from "../logger.js";
 import type { ExtractedString, ScanOptions } from "../types.js";
 
 export interface ScanResult {
   strings: ExtractedString[];
-  messages: Record<string, string>;
   fileCount: number;
 }
 
@@ -30,8 +28,6 @@ export async function scan(
   });
 
   const allStrings: ExtractedString[] = [];
-  const messages: Record<string, string> = {};
-  const keyStrategy = options.keyStrategy ?? "hash";
 
   const limit = pLimit(10);
   let completed = 0;
@@ -63,18 +59,11 @@ export async function scan(
 
   for (const result of fileResults) {
     if (!result) continue;
-    for (const str of result.strings) {
-      const key = generateKey(str, keyStrategy);
-      if (!(key in messages)) {
-        messages[key] = str.text;
-      }
-      allStrings.push(str);
-    }
+    allStrings.push(...result.strings);
   }
 
   return {
     strings: allStrings,
-    messages,
     fileCount: files.length,
   };
 }
