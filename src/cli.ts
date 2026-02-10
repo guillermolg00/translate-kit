@@ -2,13 +2,15 @@ import "dotenv/config";
 import { defineCommand, runMain } from "citty";
 import { join } from "node:path";
 import { loadTranslateKitConfig } from "./config.js";
-import { flatten, unflatten } from "./flatten.js";
-import { loadJsonFile, loadLockFile, computeDiff } from "./diff.js";
-import { translateAll } from "./translate.js";
-import { writeTranslation, writeLockFile } from "./writer.js";
+import { flatten } from "./flatten.js";
+import { loadJsonFile } from "./diff.js";
 import { scan } from "./scanner/index.js";
-import { generateSemanticKeys } from "./scanner/key-ai.js";
-import { codegen } from "./codegen/index.js";
+import {
+  loadMapFile,
+  runScanStep,
+  runCodegenStep,
+  runTranslateStep,
+} from "./pipeline.js";
 import {
   logStart,
   logLocaleStart,
@@ -19,46 +21,14 @@ import {
   logError,
   logInfo,
   logSuccess,
-  logVerbose,
   logWarning,
   logUsage,
   logProgress,
   logProgressClear,
 } from "./logger.js";
 import { createUsageTracker, estimateCost, formatUsage, formatCost } from "./usage.js";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
 import type { TranslationResult } from "./types.js";
 import { parseTranslateFlags, validateLocale } from "./cli-utils.js";
-
-async function loadMapFile(
-  messagesDir: string,
-): Promise<Record<string, string>> {
-  const mapPath = join(messagesDir, ".translate-map.json");
-  let content: string;
-  try {
-    content = await readFile(mapPath, "utf-8");
-  } catch {
-    return {};
-  }
-  try {
-    return JSON.parse(content);
-  } catch {
-    logWarning(
-      `.translate-map.json is corrupted (invalid JSON). Starting fresh.`,
-    );
-    return {};
-  }
-}
-
-async function writeMapFile(
-  messagesDir: string,
-  map: Record<string, string>,
-): Promise<void> {
-  const mapPath = join(messagesDir, ".translate-map.json");
-  await mkdir(messagesDir, { recursive: true });
-  const content = JSON.stringify(map, null, 2) + "\n";
-  await writeFile(mapPath, content, "utf-8");
-}
 
 const translateCommand = defineCommand({
   meta: {
@@ -89,8 +59,6 @@ const translateCommand = defineCommand({
   async run({ args }) {
     const config = await loadTranslateKitConfig();
     const { sourceLocale, targetLocales, messagesDir, model } = config;
-    const opts = config.translation ?? {};
-    const verbose = args.verbose;
     const mode = config.mode ?? "keys";
 
     if (args.locale && !validateLocale(args.locale)) {
@@ -108,8 +76,47 @@ const translateCommand = defineCommand({
       );
     }
 
-    let sourceFlat: Record<string, string>;
+    // Dry-run: show diff counts per locale without translating
+    if (args["dry-run"]) {
+      let sourceFlat: Record<string, string>;
+      if (mode === "inline") {
+        const mapData = await loadMapFile(messagesDir);
+        sourceFlat = {};
+        for (const [text, key] of Object.entries(mapData)) {
+          sourceFlat[key] = text;
+        }
+      } else {
+        const sourceFile = join(messagesDir, `${sourceLocale}.json`);
+        const sourceRaw = await loadJsonFile(sourceFile);
+        sourceFlat = flatten(sourceRaw);
+      }
 
+      if (Object.keys(sourceFlat).length === 0) {
+        logError(
+          mode === "inline"
+            ? `No keys found in .translate-map.json. Run 'translate-kit scan' first.`
+            : `No keys found in ${join(messagesDir, `${sourceLocale}.json`)}`,
+        );
+        process.exit(1);
+      }
+
+      const dryResult = await runTranslateStep({
+        config,
+        sourceFlat,
+        locales,
+        force: args.force,
+        dryRun: true,
+      });
+
+      logStart(sourceLocale, locales);
+      for (const r of dryResult.localeResults) {
+        logDryRun(r.locale, 0, 0, r.removed, r.cached);
+      }
+      return;
+    }
+
+    // Normal translation
+    let sourceFlat: Record<string, string>;
     if (mode === "inline") {
       const mapData = await loadMapFile(messagesDir);
       sourceFlat = {};
@@ -133,122 +140,41 @@ const translateCommand = defineCommand({
 
     logStart(sourceLocale, locales);
 
-    const results: TranslationResult[] = [];
     const usageTracker = createUsageTracker();
+    const results: TranslationResult[] = [];
 
-    for (const locale of locales) {
-      const start = Date.now();
-      const targetFile = join(messagesDir, `${locale}.json`);
+    const translateResult = await runTranslateStep({
+      config,
+      sourceFlat,
+      locales,
+      force: args.force,
+      callbacks: {
+        onLocaleProgress: (locale, c, t) =>
+          logProgress(c, t, `Translating ${locale}...`),
+        onUsage: (usage) => usageTracker.add(usage),
+      },
+    });
 
-      logLocaleStart(locale);
-
-      const targetRaw = await loadJsonFile(targetFile);
-      const targetFlat = flatten(targetRaw);
-
-      let lockData = await loadLockFile(messagesDir);
-
-      if (args.force) {
-        lockData = {};
-      }
-
-      const diffResult = computeDiff(sourceFlat, targetFlat, lockData);
-      const toTranslate = { ...diffResult.added, ...diffResult.modified };
-
-      if (args["dry-run"]) {
-        logDryRun(
-          locale,
-          Object.keys(diffResult.added).length,
-          Object.keys(diffResult.modified).length,
-          diffResult.removed.length,
-          Object.keys(diffResult.unchanged).length,
-        );
-        continue;
-      }
-
-      let translated: Record<string, string> = {};
-      let errors = 0;
-      let translationFailed = false;
-
-      if (Object.keys(toTranslate).length > 0) {
-        try {
-          translated = await translateAll({
-            model,
-            entries: toTranslate,
-            sourceLocale,
-            targetLocale: locale,
-            options: opts,
-            onBatchComplete: (batch) => {
-              logVerbose(
-                `Batch complete: ${Object.keys(batch).length} keys`,
-                verbose,
-              );
-            },
-            onProgress: (c, t) => logProgress(c, t, `Translating ${locale}...`),
-            onUsage: (usage) => usageTracker.add(usage),
-          });
-          logProgressClear();
-        } catch (err) {
-          logProgressClear();
-          errors = Object.keys(toTranslate).length;
-          translationFailed = true;
-          logError(
-            `Translation failed for ${locale}: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      }
-
-      if (translationFailed) {
-        const result: TranslationResult = {
-          locale,
-          translated: 0,
-          cached: Object.keys(diffResult.unchanged).length,
-          removed: 0,
-          errors,
-          duration: Date.now() - start,
-        };
-        logLocaleResult(result);
-        results.push(result);
-        continue;
-      }
-
-      const finalFlat: Record<string, string> = {
-        ...diffResult.unchanged,
-        ...translated,
-      };
-
-      await writeTranslation(targetFile, finalFlat, {
-        flat: mode === "inline",
-      });
-
-      const allTranslatedKeys = Object.keys(finalFlat);
-      const currentLock = await loadLockFile(messagesDir);
-      await writeLockFile(
-        messagesDir,
-        sourceFlat,
-        currentLock,
-        allTranslatedKeys,
-      );
-
+    for (const r of translateResult.localeResults) {
+      logLocaleStart(r.locale);
+      logProgressClear();
       const result: TranslationResult = {
-        locale,
-        translated: Object.keys(translated).length,
-        cached: Object.keys(diffResult.unchanged).length,
-        removed: diffResult.removed.length,
-        errors,
-        duration: Date.now() - start,
+        locale: r.locale,
+        translated: r.translated,
+        cached: r.cached,
+        removed: r.removed,
+        errors: r.errors,
+        duration: r.duration,
       };
-
       logLocaleResult(result);
       results.push(result);
     }
 
-    if (!args["dry-run"]) {
-      logSummary(results);
-      const usage = usageTracker.get();
-      if (usage.totalTokens > 0) {
-        const cost = await estimateCost(model, usage);
-        logUsage(formatUsage(usage), cost ? formatCost(cost.totalUSD) : undefined);
-      }
+    logSummary(results);
+    const usage = usageTracker.get();
+    if (usage.totalTokens > 0) {
+      const cost = await estimateCost(model, usage);
+      logUsage(formatUsage(usage), cost ? formatCost(cost.totalUSD) : undefined);
     }
   },
 });
@@ -276,20 +202,21 @@ const scanCommand = defineCommand({
       process.exit(1);
     }
 
-    const result = await scan(config.scan, process.cwd(), {
-      onProgress: (c, t) => logProgress(c, t, "Scanning..."),
-    });
-    logProgressClear();
-
-    const bareStrings = result.strings.filter((s) => {
-      if (s.type === "t-call") return false;
-      if (s.type === "T-component" && s.id) return false;
-      return true;
-    });
-
-    logScanResult(bareStrings.length, result.fileCount);
-
+    // Dry-run: show found strings without writing anything
     if (args["dry-run"]) {
+      const result = await scan(config.scan, process.cwd(), {
+        onProgress: (c, t) => logProgress(c, t, "Scanning..."),
+      });
+      logProgressClear();
+
+      const bareStrings = result.strings.filter((s) => {
+        if (s.type === "t-call") return false;
+        if (s.type === "T-component" && s.id) return false;
+        return true;
+      });
+
+      logScanResult(bareStrings.length, result.fileCount);
+
       for (const str of bareStrings) {
         logInfo(
           `"${str.text}" (${str.componentName ?? "unknown"}, ${str.file})`,
@@ -303,44 +230,22 @@ const scanCommand = defineCommand({
       return;
     }
 
-    const existingMap = await loadMapFile(config.messagesDir);
-
-    if (mode === "inline") {
-      const existingTComponents = result.strings.filter(
-        (s) => s.type === "T-component" && s.id,
-      );
-      for (const tc of existingTComponents) {
-        if (tc.id && !(tc.text in existingMap)) {
-          existingMap[tc.text] = tc.id;
-        }
-      }
-      const existingInlineTCalls = result.strings.filter(
-        (s) => s.type === "t-call" && s.id,
-      );
-      for (const tc of existingInlineTCalls) {
-        if (tc.id && !(tc.text in existingMap)) {
-          existingMap[tc.text] = tc.id;
-        }
-      }
-    }
-
-    logInfo("Generating semantic keys...");
+    // Normal scan
     const scanUsageTracker = createUsageTracker();
-    const textToKey = await generateSemanticKeys({
-      model: config.model,
-      strings: bareStrings,
-      existingMap,
-      batchSize: config.translation?.batchSize ?? 50,
-      concurrency: config.translation?.concurrency ?? 3,
-      retries: config.translation?.retries ?? 2,
-      onProgress: (c, t) => logProgress(c, t, "Generating keys..."),
-      onUsage: (usage) => scanUsageTracker.add(usage),
+    const scanResult = await runScanStep({
+      config,
+      cwd: process.cwd(),
+      callbacks: {
+        onScanProgress: (c, t) => logProgress(c, t, "Scanning..."),
+        onKeygenProgress: (c, t) => logProgress(c, t, "Generating keys..."),
+        onUsage: (usage) => scanUsageTracker.add(usage),
+      },
     });
     logProgressClear();
 
-    await writeMapFile(config.messagesDir, textToKey);
+    logScanResult(scanResult.bareStringCount, scanResult.fileCount);
     logSuccess(
-      `Written .translate-map.json (${Object.keys(textToKey).length} keys)`,
+      `Written .translate-map.json (${Object.keys(scanResult.textToKey).length} keys)`,
     );
 
     if (mode === "inline") {
@@ -348,20 +253,10 @@ const scanCommand = defineCommand({
         "Inline mode: source text stays in code, no source locale JSON created.",
       );
     } else {
-      const messages: Record<string, string> = {};
-      for (const [text, key] of Object.entries(textToKey)) {
-        messages[key] = text;
-      }
-
       const sourceFile = join(
         config.messagesDir,
         `${config.sourceLocale}.json`,
       );
-      await mkdir(config.messagesDir, { recursive: true });
-      const nested = unflatten(messages);
-      const content = JSON.stringify(nested, null, 2) + "\n";
-      await writeFile(sourceFile, content, "utf-8");
-
       logSuccess(`Written to ${sourceFile}`);
     }
 
@@ -396,14 +291,15 @@ const codegenCommand = defineCommand({
       process.exit(1);
     }
 
-    const textToKey = await loadMapFile(config.messagesDir);
-
-    if (Object.keys(textToKey).length === 0) {
-      logError("No .translate-map.json found. Run 'translate-kit scan' first.");
-      process.exit(1);
-    }
-
+    // Dry-run: show what would be changed
     if (args["dry-run"]) {
+      const textToKey = await loadMapFile(config.messagesDir);
+
+      if (Object.keys(textToKey).length === 0) {
+        logError("No .translate-map.json found. Run 'translate-kit scan' first.");
+        process.exit(1);
+      }
+
       if (mode === "inline") {
         logInfo(
           `\n  Would wrap ${Object.keys(textToKey).length} strings with <T> components\n`,
@@ -422,14 +318,13 @@ const codegenCommand = defineCommand({
       return;
     }
 
-    const result = await codegen({
-      include: config.scan.include,
-      exclude: config.scan.exclude,
-      textToKey,
-      i18nImport: config.scan.i18nImport,
-      mode,
-      componentPath: config.inline?.componentPath,
-      onProgress: (c, t) => logProgress(c, t, "Processing files..."),
+    // Normal codegen
+    const result = await runCodegenStep({
+      config,
+      cwd: process.cwd(),
+      callbacks: {
+        onProgress: (c, t) => logProgress(c, t, "Processing files..."),
+      },
     });
     logProgressClear();
 

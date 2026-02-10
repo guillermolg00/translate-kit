@@ -3,13 +3,11 @@ import { existsSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { loadTranslateKitConfig } from "./config.js";
-import { scan } from "./scanner/index.js";
-import { generateSemanticKeys } from "./scanner/key-ai.js";
-import { codegen } from "./codegen/index.js";
-import { translateAll } from "./translate.js";
-import { writeTranslation, writeLockFile } from "./writer.js";
-import { loadLockFile } from "./diff.js";
-import { unflatten } from "./flatten.js";
+import {
+  runScanStep,
+  runCodegenStep,
+  runTranslateStep,
+} from "./pipeline.js";
 import {
   CLIENT_TEMPLATE,
   serverTemplate,
@@ -663,182 +661,67 @@ export async function runInitWizard(): Promise<void> {
     return;
   }
 
-  const { model } = config;
   const usageTracker = createUsageTracker();
 
-  const scanOptions = {
-    include: includePatterns,
-    exclude: ["**/*.test.*", "**/*.spec.*"],
-    i18nImport,
-  };
-
+  // --- SCAN ---
   const s1 = p.spinner();
   s1.start("Scanning...");
-  const scanResult = await scan(scanOptions, cwd, {
-    onProgress: (c, t) => { s1.message(`Scanning... ${c}/${t} files`); },
+  const scanResult = await runScanStep({
+    config,
+    cwd,
+    callbacks: {
+      onScanProgress: (c, t) => s1.message(`Scanning... ${c}/${t} files`),
+      onKeygenProgress: (c, t) => s1.message(`Generating keys... ${c}/${t}`),
+      onUsage: (usage) => usageTracker.add(usage),
+    },
   });
-  const transformableStrings = scanResult.strings.filter(
-    (s) =>
-      s.type === "jsx-text" ||
-      s.type === "jsx-attribute" ||
-      s.type === "object-property",
-  );
   s1.stop(
-    `Scanning... ${transformableStrings.length} strings from ${scanResult.fileCount} files`,
+    `Found ${scanResult.bareStringCount} strings from ${scanResult.fileCount} files`,
   );
 
-  if (transformableStrings.length === 0) {
+  if (scanResult.bareStringCount === 0) {
     p.log.warn("No translatable strings found. Check your include patterns.");
     p.outro("Config created, but no strings to process.");
     return;
   }
 
-  const resolvedMessagesDir = join(cwd, messagesDir);
-  await mkdir(resolvedMessagesDir, { recursive: true });
-
-  let existingMap: Record<string, string> = {};
-  const mapPath = join(resolvedMessagesDir, ".translate-map.json");
-  try {
-    existingMap = JSON.parse(await readFile(mapPath, "utf-8"));
-  } catch {
-    // No existing map file — fresh start
-  }
-
-  const s2 = p.spinner();
-  s2.start("Generating keys...");
-  const textToKey = await generateSemanticKeys({
-    model,
-    strings: transformableStrings,
-    existingMap,
-    batchSize: config.translation?.batchSize ?? 50,
-    concurrency: config.translation?.concurrency ?? 3,
-    retries: config.translation?.retries ?? 2,
-    onProgress: (c, t) => { s2.message(`Generating keys... ${c}/${t}`); },
-    onUsage: (usage) => usageTracker.add(usage),
-  });
-  s2.stop("Generating keys... done");
-
-  await writeFile(mapPath, JSON.stringify(textToKey, null, 2) + "\n", "utf-8");
-
-  const messages: Record<string, string> = {};
-  for (const [text, key] of Object.entries(textToKey)) {
-    messages[key] = text;
-  }
-
-  let sourceFlat: Record<string, string>;
-
-  if (mode === "inline") {
-    sourceFlat = messages;
-  } else {
-    const sourceFile = join(resolvedMessagesDir, `${sourceLocale}.json`);
-    const nested = unflatten(messages);
-    await writeFile(
-      sourceFile,
-      JSON.stringify(nested, null, 2) + "\n",
-      "utf-8",
-    );
-    sourceFlat = messages;
-  }
-
+  // --- CODEGEN ---
   const s3 = p.spinner();
   s3.start("Codegen...");
-  const codegenResult = await codegen(
-    {
-      include: includePatterns,
-      exclude: ["**/*.test.*", "**/*.spec.*"],
-      textToKey,
-      i18nImport,
-      mode,
-      componentPath,
-      onProgress: (c, t) => { s3.message(`Codegen... ${c}/${t} files`); },
-    },
+  const codegenResult = await runCodegenStep({
+    config,
     cwd,
-  );
+    textToKey: scanResult.textToKey,
+    callbacks: {
+      onProgress: (c, t) => s3.message(`Codegen... ${c}/${t} files`),
+    },
+  });
   s3.stop(
     `Codegen... ${codegenResult.stringsWrapped} strings wrapped in ${codegenResult.filesModified} files`,
   );
 
-  const postScan = await scan(scanOptions, cwd, {
-    onProgress: (c, t) => { s3.message(`Validating... ${c}/${t} files`); },
-  });
-
-  const keyToText: Record<string, string> = {};
-  for (const [text, key] of Object.entries(textToKey)) {
-    keyToText[key] = text;
-  }
-
-  const reconciledMessages: Record<string, string> = {};
-
-  if (mode === "inline") {
-    const tComponents = postScan.strings.filter(
-      (s) => s.type === "T-component" && s.id,
-    );
-    const inlineTCalls = postScan.strings.filter(
-      (s) => s.type === "t-call" && s.id,
-    );
-    for (const tc of tComponents) {
-      if (tc.id && tc.id in keyToText) {
-        reconciledMessages[tc.id] = keyToText[tc.id];
-      }
-    }
-    for (const tc of inlineTCalls) {
-      if (tc.id && tc.id in keyToText) {
-        reconciledMessages[tc.id] = keyToText[tc.id];
-      }
-    }
-  } else {
-    const tCalls = postScan.strings.filter((s) => s.type === "t-call");
-    for (const tCall of tCalls) {
-      const key = tCall.text;
-      if (key in keyToText) {
-        reconciledMessages[key] = keyToText[key];
-      }
-    }
-
-    const sourceFile = join(resolvedMessagesDir, `${sourceLocale}.json`);
-    const reconciledNested = unflatten(reconciledMessages);
-    await writeFile(
-      sourceFile,
-      JSON.stringify(reconciledNested, null, 2) + "\n",
-      "utf-8",
-    );
-  }
-
-  sourceFlat = reconciledMessages;
-
-  const translationOpts = config.translation ?? {};
-
+  // --- TRANSLATE ---
   for (const locale of targetLocales) {
     const st = p.spinner();
     st.start(`Translating ${locale}...`);
 
-    const translated = await translateAll({
-      model,
-      entries: sourceFlat,
-      sourceLocale,
-      targetLocale: locale,
-      options: translationOpts,
-      onProgress: (c, t) => { st.message(`Translating ${locale}... ${c}/${t} keys`); },
-      onUsage: (usage) => usageTracker.add(usage),
+    await runTranslateStep({
+      config,
+      sourceFlat: scanResult.sourceFlat,
+      locales: [locale],
+      callbacks: {
+        onLocaleProgress: (_locale, c, t) =>
+          st.message(`Translating ${locale}... ${c}/${t} keys`),
+        onUsage: (usage) => usageTracker.add(usage),
+      },
     });
-
-    const targetFile = join(resolvedMessagesDir, `${locale}.json`);
-    await writeTranslation(targetFile, translated, { flat: mode === "inline" });
-
-    const lockData = await loadLockFile(resolvedMessagesDir);
-    await writeLockFile(
-      resolvedMessagesDir,
-      sourceFlat,
-      lockData,
-      Object.keys(translated),
-    );
 
     st.stop(`Translating ${locale}... done`);
   }
 
   const usage = usageTracker.get();
   if (usage.totalTokens > 0) {
-    const cost = await estimateCost(model, usage);
+    const cost = await estimateCost(config.model, usage);
     const costStr = cost ? ` · ${formatCost(cost.totalUSD)}` : "";
     p.log.info(`${formatUsage(usage)}${costStr}`);
   }

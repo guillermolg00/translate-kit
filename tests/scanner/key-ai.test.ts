@@ -159,6 +159,83 @@ describe("generateSemanticKeys", () => {
     expect(Object.keys(result)).toHaveLength(2);
   });
 
+  it("preserves existingMap entries for wrapped strings when allTexts is provided", async () => {
+    // Simulates: after codegen, most strings are wrapped (T-components/t-calls).
+    // scan passes only bare (new) strings, but allTexts includes all texts.
+    const existingMap = {
+      "Sign in": "auth.signIn",
+      "Welcome to our platform": "hero.welcome",
+      Save: "common.save",
+      "Search...": "common.searchPlaceholder",
+    };
+
+    // Only 1 new bare string
+    const bareStrings: ExtractedString[] = [
+      {
+        text: "New feature",
+        type: "jsx-text",
+        file: "src/components/New.tsx",
+        line: 1,
+        column: 0,
+        componentName: "New",
+        parentTag: "h2",
+      },
+    ];
+
+    // allTexts includes wrapped strings' texts + the new bare string
+    const allTexts = new Set([
+      "Sign in",
+      "Welcome to our platform",
+      "Save",
+      "Search...",
+      "New feature",
+    ]);
+
+    vi.mocked(generateObject).mockResolvedValueOnce(
+      makeMockResponse([{ index: 0, key: "features.newFeature" }]),
+    );
+
+    const result = await generateSemanticKeys({
+      model: mockModel,
+      strings: bareStrings,
+      existingMap,
+      allTexts,
+    });
+
+    // All existing entries preserved
+    expect(result["Sign in"]).toBe("auth.signIn");
+    expect(result["Welcome to our platform"]).toBe("hero.welcome");
+    expect(result["Save"]).toBe("common.save");
+    expect(result["Search..."]).toBe("common.searchPlaceholder");
+    // New entry added
+    expect(result["New feature"]).toBe("features.newFeature");
+    expect(Object.keys(result)).toHaveLength(5);
+  });
+
+  it("without allTexts, only bare strings determine active entries (old behavior)", async () => {
+    // This demonstrates the bug when allTexts is NOT provided:
+    // existingMap entries whose text is not in `strings` get dropped
+    const existingMap = {
+      "Sign in": "auth.signIn",
+      "Welcome to our platform": "hero.welcome",
+    };
+
+    // Only "Sign in" is a bare string; "Welcome" is wrapped
+    const bareStrings: ExtractedString[] = [mockStrings[0]]; // "Sign in"
+
+    const result = await generateSemanticKeys({
+      model: mockModel,
+      strings: bareStrings,
+      existingMap,
+      // No allTexts → falls back to strings.map(s => s.text)
+    });
+
+    // Only "Sign in" is preserved (the one in bare strings)
+    expect(result["Sign in"]).toBe("auth.signIn");
+    expect(result["Welcome to our platform"]).toBeUndefined(); // Dropped!
+    expect(Object.keys(result)).toHaveLength(1);
+  });
+
   it("resolves key collisions with numeric suffix", async () => {
     const existingMap = {
       "Sign in": "auth.signIn",

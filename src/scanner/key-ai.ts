@@ -7,6 +7,8 @@ interface KeyGenInput {
   model: LanguageModel;
   strings: ExtractedString[];
   existingMap?: Record<string, string>;
+  /** All texts found in the codebase (including wrapped). Used to determine which existingMap entries are still active. When omitted, defaults to texts from `strings`. */
+  allTexts?: Set<string>;
   batchSize?: number;
   concurrency?: number;
   retries?: number;
@@ -134,6 +136,7 @@ export async function generateSemanticKeys(
     model,
     strings,
     existingMap = {},
+    allTexts,
     batchSize = 50,
     concurrency = 3,
     retries = 2,
@@ -141,7 +144,7 @@ export async function generateSemanticKeys(
     onUsage,
   } = input;
 
-  const activeTexts = new Set(strings.map((s) => s.text));
+  const activeTexts = allTexts ?? new Set(strings.map((s) => s.text));
   const activeExisting: Record<string, string> = {};
   for (const [text, key] of Object.entries(existingMap)) {
     if (activeTexts.has(text)) {
