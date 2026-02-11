@@ -1,3 +1,4 @@
+"use client";
 import { T, useT } from "@/components/t";
 
 export default function Hero() {

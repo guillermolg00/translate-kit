@@ -78,6 +78,43 @@ describe("serverTemplate (with opts)", () => {
   });
 });
 
+describe("serverTemplate (with splitByNamespace)", () => {
+  const output = serverTemplate("t", { ...defaultOpts, splitByNamespace: true });
+
+  it("uses readdir for split loading", () => {
+    expect(output).toContain("readdir");
+  });
+
+  it("reads namespace files from directory", () => {
+    expect(output).toContain("join(process.cwd(), messagesDir, locale)");
+    expect(output).toContain('.filter(f => f.endsWith(".json"))');
+  });
+
+  it("flattens namespace keys with prefix", () => {
+    expect(output).toContain('ns + "." + full');
+  });
+
+  it("handles _root namespace without prefix", () => {
+    expect(output).toContain('ns === "_root" ? full : ns + "." + full');
+  });
+
+  it("does NOT read single file", () => {
+    expect(output).not.toContain('${locale}.json');
+  });
+});
+
+describe("serverTemplate (without splitByNamespace)", () => {
+  const output = serverTemplate("t", defaultOpts);
+
+  it("reads single locale file", () => {
+    expect(output).toContain("${locale}.json");
+  });
+
+  it("does NOT use readdir", () => {
+    expect(output).not.toContain("readdir");
+  });
+});
+
 describe("serverTemplate (legacy, no opts)", () => {
   const output = serverTemplate("t");
 
@@ -95,6 +132,38 @@ describe("serverTemplate (legacy, no opts)", () => {
 
   it("does NOT include NEXT_LOCALE cookie reading", () => {
     expect(output).not.toContain("NEXT_LOCALE");
+  });
+});
+
+describe("generateI18nHelper (with splitByNamespace)", () => {
+  const output = generateI18nHelper({ ...defaultOpts, splitByNamespace: true });
+
+  it("imports readdir from node:fs/promises", () => {
+    expect(output).toContain("readdir");
+    expect(output).toContain('from "node:fs/promises"');
+  });
+
+  it("reads namespace files from directory in getMessages", () => {
+    const fnStart = output.indexOf("async function getMessages");
+    const body = output.slice(fnStart);
+    expect(body).toContain("readdir(dir)");
+    expect(body).toContain('.filter(f => f.endsWith(".json"))');
+  });
+
+  it("handles _root namespace without prefix", () => {
+    expect(output).toContain('ns === "_root" ? full : ns + "." + full');
+  });
+});
+
+describe("generateI18nHelper (without splitByNamespace)", () => {
+  const output = generateI18nHelper(defaultOpts);
+
+  it("does NOT import readdir", () => {
+    expect(output).not.toContain("readdir");
+  });
+
+  it("reads single locale file in getMessages", () => {
+    expect(output).toContain("${locale}.json");
   });
 });
 

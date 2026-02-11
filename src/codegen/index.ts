@@ -26,6 +26,7 @@ export interface CodegenResult {
   stringsWrapped: number;
   filesProcessed: number;
   filesSkipped: number;
+  clientNamespaces: string[];
 }
 
 interface ParsedFileEntry {
@@ -229,6 +230,7 @@ export async function codegen(
 
   const limit = pLimit(10);
   let completed = 0;
+  const clientNamespacesSet = new Set<string>();
 
   const fileResults = await Promise.all(
     parsedEntries.map((entry) =>
@@ -242,6 +244,8 @@ export async function codegen(
           return { modified: false, wrapped: 0, skipped: false };
         }
 
+        const isClient =
+          forceClientSet.has(entry.filePath) || entry.isClientRoot;
         const fileTransformOpts: TransformOptions = {
           ...transformOpts,
           forceClient: forceClientSet.has(entry.filePath),
@@ -252,6 +256,16 @@ export async function codegen(
           options.textToKey,
           fileTransformOpts,
         );
+
+        // Collect namespaces from client files for selective message passing
+        if (isClient && result.usedKeys.length > 0) {
+          for (const key of result.usedKeys) {
+            const dot = key.indexOf(".");
+            if (dot > 0) {
+              clientNamespacesSet.add(key.slice(0, dot));
+            }
+          }
+        }
 
         if (result.modified) {
           try {
@@ -299,5 +313,6 @@ export async function codegen(
     stringsWrapped,
     filesProcessed: files.length,
     filesSkipped,
+    clientNamespaces: [...clientNamespacesSet].sort(),
   };
 }

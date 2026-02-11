@@ -34,7 +34,9 @@ export function enrichStrings(
   }
 
   // Find section headings (h1-h3)
-  const headings = strings.filter((s) => s.parentTag && /^h[1-3]$/.test(s.parentTag));
+  const headings = strings.filter(
+    (s) => s.parentTag && /^h[1-3]$/.test(s.parentTag),
+  );
   const defaultHeading = headings.length > 0 ? headings[0].text : undefined;
 
   return strings.map((str) => {

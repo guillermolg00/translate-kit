@@ -29,12 +29,46 @@ export function useT() {
 }
 `;
 
+const SINGLE_FILE_LOAD_BODY = `  const { readFile } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  try {
+    const filePath = join(process.cwd(), messagesDir, \`\${locale}.json\`);
+    const content = await readFile(filePath, "utf-8");
+    return JSON.parse(content);
+  } catch {
+    return {};
+  }`;
+
+const SPLIT_LOAD_BODY = `  const { readFile, readdir } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  try {
+    const dir = join(process.cwd(), messagesDir, locale);
+    let files: string[];
+    try { files = (await readdir(dir)).filter(f => f.endsWith(".json")); } catch { return {}; }
+    const msgs: Messages = {};
+    for (const f of files) {
+      const ns = f.replace(".json", "");
+      const data = JSON.parse(await readFile(join(dir, f), "utf-8"));
+      (function flat(obj: any, prefix: string) {
+        for (const [k, v] of Object.entries(obj)) {
+          const full = prefix ? prefix + "." + k : k;
+          if (typeof v === "object" && v !== null && !Array.isArray(v)) flat(v, full);
+          else msgs[ns === "_root" ? full : ns + "." + full] = v as string;
+        }
+      })(data, "");
+    }
+    return msgs;
+  } catch {
+    return {};
+  }`;
+
 export function serverTemplate(
   clientBasename: string,
   opts?: {
     sourceLocale: string;
     targetLocales: string[];
     messagesDir: string;
+    splitByNamespace?: boolean;
   },
 ): string {
   if (!opts) {
@@ -128,15 +162,7 @@ const getCachedMessages = cache(async (): Promise<Messages> => {
   }
 
   if (locale === defaultLocale) return {};
-  const { readFile } = await import("node:fs/promises");
-  const { join } = await import("node:path");
-  try {
-    const filePath = join(process.cwd(), messagesDir, \`\${locale}.json\`);
-    const content = await readFile(filePath, "utf-8");
-    return JSON.parse(content);
-  } catch {
-    return {};
-  }
+${opts.splitByNamespace ? SPLIT_LOAD_BODY : SINGLE_FILE_LOAD_BODY}
 });
 
 // Per-request message store (populated by setServerMessages in layout)
@@ -197,11 +223,48 @@ export function generateI18nHelper(opts: {
   sourceLocale: string;
   targetLocales: string[];
   messagesDir: string;
+  splitByNamespace?: boolean;
 }): string {
   const allLocales = [opts.sourceLocale, ...opts.targetLocales];
   const allLocalesStr = allLocales.map((l) => `"${l}"`).join(", ");
+
+  const fsImports = opts.splitByNamespace
+    ? `import { readFile, readdir } from "node:fs/promises";`
+    : `import { readFile } from "node:fs/promises";`;
+
+  const getMessagesBody = opts.splitByNamespace
+    ? `  if (locale === defaultLocale) return {};
+  try {
+    const dir = join(process.cwd(), "${opts.messagesDir}", locale);
+    let files: string[];
+    try { files = (await readdir(dir)).filter(f => f.endsWith(".json")); } catch { return {}; }
+    const msgs: Record<string, string> = {};
+    for (const f of files) {
+      const ns = f.replace(".json", "");
+      const data = JSON.parse(await readFile(join(dir, f), "utf-8"));
+      (function flat(obj: any, prefix: string) {
+        for (const [k, v] of Object.entries(obj)) {
+          const full = prefix ? prefix + "." + k : k;
+          if (typeof v === "object" && v !== null && !Array.isArray(v)) flat(v, full);
+          else msgs[ns === "_root" ? full : ns + "." + full] = v as string;
+        }
+      })(data, "");
+    }
+    return msgs;
+  } catch {
+    return {};
+  }`
+    : `  if (locale === defaultLocale) return {};
+  try {
+    const filePath = join(process.cwd(), "${opts.messagesDir}", \`\${locale}.json\`);
+    const content = await readFile(filePath, "utf-8");
+    return JSON.parse(content);
+  } catch {
+    return {};
+  }`;
+
   return `import { headers, cookies } from "next/headers";
-import { readFile } from "node:fs/promises";
+${fsImports}
 import { join } from "node:path";
 
 const supported = [${allLocalesStr}] as const;
@@ -237,14 +300,7 @@ export async function getLocale(): Promise<Locale> {
 }
 
 export async function getMessages(locale: string): Promise<Record<string, string>> {
-  if (locale === defaultLocale) return {};
-  try {
-    const filePath = join(process.cwd(), "${opts.messagesDir}", \`\${locale}.json\`);
-    const content = await readFile(filePath, "utf-8");
-    return JSON.parse(content);
-  } catch {
-    return {};
-  }
+${getMessagesBody}
 }
 `;
 }

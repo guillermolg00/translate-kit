@@ -108,7 +108,7 @@ async function ensurePackageInstalled(
   p.log.success(`${label} found.`);
 }
 
-function generateConfigFile(opts: {
+export function generateConfigFile(opts: {
   providerKey: ProviderKey;
   modelName: string;
   sourceLocale: string;
@@ -120,6 +120,7 @@ function generateConfigFile(opts: {
   tone: string;
   mode: "keys" | "inline";
   componentPath?: string;
+  splitByNamespace?: boolean;
 }): string {
   const provider = AI_PROVIDERS[opts.providerKey];
   const lines: string[] = [];
@@ -136,6 +137,9 @@ function generateConfigFile(opts: {
     `  targetLocales: [${opts.targetLocales.map((l) => `"${l}"`).join(", ")}],`,
   );
   lines.push(`  messagesDir: "${opts.messagesDir}",`);
+  if (opts.splitByNamespace) {
+    lines.push(`  splitByNamespace: true,`);
+  }
 
   const hasTranslation = opts.context || opts.tone !== "neutral";
   if (hasTranslation) {
@@ -223,12 +227,17 @@ function findLayoutFile(base: string): string | undefined {
 async function createEmptyMessageFiles(
   msgDir: string,
   locales: string[],
+  splitByNamespace?: boolean,
 ): Promise<void> {
   await mkdir(msgDir, { recursive: true });
   for (const locale of locales) {
-    const msgFile = join(msgDir, `${locale}.json`);
-    if (!existsSync(msgFile)) {
-      await writeFile(msgFile, "{}\n", "utf-8");
+    if (splitByNamespace) {
+      await mkdir(join(msgDir, locale), { recursive: true });
+    } else {
+      const msgFile = join(msgDir, `${locale}.json`);
+      if (!existsSync(msgFile)) {
+        await writeFile(msgFile, "{}\n", "utf-8");
+      }
     }
   }
 }
@@ -256,6 +265,7 @@ async function setupNextIntl(
   sourceLocale: string,
   targetLocales: string[],
   messagesDir: string,
+  splitByNamespace?: boolean,
 ): Promise<void> {
   const useSrc = detectSrcDir(cwd);
   const base = useSrc ? join(cwd, "src") : cwd;
@@ -269,10 +279,37 @@ async function setupNextIntl(
   if (!existsSync(requestFile)) {
     const relMessages = relative(i18nDir, join(cwd, messagesDir));
     const allLocalesStr = allLocales.map((l) => `"${l}"`).join(", ");
+
+    const messagesLoader = splitByNamespace
+      ? `await loadNamespaceMessages(join(process.cwd(), "${messagesDir}", locale))`
+      : `(await import(\`${relMessages}/\${locale}.json\`)).default`;
+
+    const splitHelpers = splitByNamespace
+      ? `
+import { readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
+
+async function loadNamespaceMessages(dir: string): Promise<Record<string, unknown>> {
+  let files: string[];
+  try { files = await readdir(dir); } catch { return {}; }
+  const messages: Record<string, unknown> = {};
+  for (const file of files.filter((f) => f.endsWith(".json"))) {
+    const ns = file.replace(".json", "");
+    if (ns === "_root") {
+      Object.assign(messages, JSON.parse(await readFile(join(dir, file), "utf-8")));
+    } else {
+      messages[ns] = JSON.parse(await readFile(join(dir, file), "utf-8"));
+    }
+  }
+  return messages;
+}
+`
+      : "";
+
     await writeFile(
       requestFile,
       `import { getRequestConfig } from "next-intl/server";
-import { headers } from "next/headers";
+import { headers } from "next/headers";${splitHelpers}
 
 const supported = [${allLocalesStr}] as const;
 type Locale = (typeof supported)[number];
@@ -300,7 +337,7 @@ export default getRequestConfig(async () => {
 
   return {
     locale,
-    messages: (await import(\`${relMessages}/\${locale}.json\`)).default,
+    messages: ${messagesLoader},
   };
 });
 `,
@@ -372,7 +409,7 @@ export default getRequestConfig(async () => {
     }
   }
 
-  await createEmptyMessageFiles(join(cwd, messagesDir), allLocales);
+  await createEmptyMessageFiles(join(cwd, messagesDir), allLocales, splitByNamespace);
 
   if (filesCreated.length > 0) {
     p.log.success(`next-intl configured: ${filesCreated.join(", ")}`);
@@ -386,6 +423,7 @@ async function dropInlineComponents(
     sourceLocale: string;
     targetLocales: string[];
     messagesDir: string;
+    splitByNamespace?: boolean;
   },
 ): Promise<void> {
   const fsPath = resolveComponentPath(cwd, componentPath);
@@ -410,6 +448,7 @@ async function setupInlineI18n(
   sourceLocale: string,
   targetLocales: string[],
   messagesDir: string,
+  splitByNamespace?: boolean,
 ): Promise<void> {
   const useSrc = existsSync(join(cwd, "src"));
   const base = useSrc ? join(cwd, "src") : cwd;
@@ -424,6 +463,7 @@ async function setupInlineI18n(
       sourceLocale,
       targetLocales,
       messagesDir,
+      splitByNamespace,
     });
     await writeFile(helperFile, helperContent, "utf-8");
     filesCreated.push(relative(cwd, helperFile));
@@ -471,10 +511,70 @@ async function setupInlineI18n(
   await createEmptyMessageFiles(join(cwd, messagesDir), [
     sourceLocale,
     ...targetLocales,
-  ]);
+  ], splitByNamespace);
 
   if (filesCreated.length > 0) {
     p.log.success(`Inline i18n configured: ${filesCreated.join(", ")}`);
+  }
+}
+
+export async function updateLayoutWithSelectiveMessages(
+  cwd: string,
+  clientNamespaces: string[],
+): Promise<void> {
+  if (clientNamespaces.length === 0) return;
+
+  const useSrc = detectSrcDir(cwd);
+  const base = useSrc ? join(cwd, "src") : cwd;
+  const layoutPath = findLayoutFile(base);
+  if (!layoutPath) return;
+
+  let content = await readFile(layoutPath, "utf-8");
+
+  const isNextIntl = content.includes("NextIntlClientProvider");
+  const isInline = content.includes("I18nProvider") && !isNextIntl;
+
+  if (!isNextIntl && !isInline) return;
+
+  const namespacesStr = clientNamespaces.map((n) => `"${n}"`).join(", ");
+
+  if (content.includes("clientMessages")) {
+    // Already updated — just refresh the namespace list
+    content = content.replace(
+      /pickMessages\(messages,\s*\[.*?\]\)/,
+      `pickMessages(messages, [${namespacesStr}])`,
+    );
+  } else {
+    if (!content.includes("messages={messages}")) return;
+
+    // Add pickMessages helper — different filter logic for inline vs keys mode
+    if (!content.includes("pickMessages")) {
+      const helper = isInline
+        ? '\nfunction pickMessages(messages: Record<string, string>, namespaces: string[]) {\n  return Object.fromEntries(\n    Object.entries(messages).filter(([key]) =>\n      namespaces.some(ns => key === ns || key.startsWith(ns + "."))\n    )\n  );\n}\n'
+        : '\nfunction pickMessages(messages: Record<string, unknown>, namespaces: string[]) {\n  return Object.fromEntries(Object.entries(messages).filter(([key]) => namespaces.includes(key)));\n}\n';
+      content = insertImportsAfterLast(content, helper);
+    }
+
+    // Insert clientMessages after getMessages() — handle both signatures
+    content = content.replace(
+      /const messages = await getMessages\([^)]*\);/,
+      `$&\n  const clientMessages = pickMessages(messages, [${namespacesStr}]);`,
+    );
+
+    // Replace messages={messages} with messages={clientMessages}
+    content = content.replace(
+      "messages={messages}",
+      "messages={clientMessages}",
+    );
+  }
+
+  if (
+    await safeWriteModifiedFile(layoutPath, content, "root layout (selective messages)")
+  ) {
+    const rel = relative(cwd, layoutPath);
+    p.log.success(
+      `Updated ${rel} with selective message passing (${clientNamespaces.length} namespaces)`,
+    );
   }
 }
 
@@ -556,6 +656,16 @@ export async function runInitWizard(): Promise<void> {
   });
   if (p.isCancel(messagesDir)) cancel();
 
+  let splitByNamespace = false;
+  {
+    const split = await p.confirm({
+      message: "Split messages by namespace? (messages/en/hero.json instead of en.json)",
+      initialValue: false,
+    });
+    if (p.isCancel(split)) cancel();
+    splitByNamespace = split;
+  }
+
   const detected = detectIncludePatterns(cwd);
   let includePatterns: string[];
 
@@ -628,6 +738,7 @@ export async function runInitWizard(): Promise<void> {
     tone,
     mode,
     componentPath,
+    splitByNamespace,
   });
 
   await writeFile(configPath, configContent, "utf-8");
@@ -638,6 +749,7 @@ export async function runInitWizard(): Promise<void> {
       sourceLocale,
       targetLocales,
       messagesDir,
+      splitByNamespace,
     });
     await setupInlineI18n(
       cwd,
@@ -645,9 +757,10 @@ export async function runInitWizard(): Promise<void> {
       sourceLocale,
       targetLocales,
       messagesDir,
+      splitByNamespace,
     );
   } else if (i18nImport === "next-intl") {
-    await setupNextIntl(cwd, sourceLocale, targetLocales, messagesDir);
+    await setupNextIntl(cwd, sourceLocale, targetLocales, messagesDir, splitByNamespace);
   }
 
   const runPipeline = await p.confirm({
@@ -708,6 +821,11 @@ export async function runInitWizard(): Promise<void> {
   s3.stop(
     `Codegen... ${codegenResult.stringsWrapped} strings wrapped in ${codegenResult.filesModified} files`,
   );
+
+  // Update layout with selective message passing if client namespaces were found
+  if (codegenResult.clientNamespaces.length > 0) {
+    await updateLayoutWithSelectiveMessages(cwd, codegenResult.clientNamespaces);
+  }
 
   // --- TRANSLATE ---
   for (const locale of targetLocales) {

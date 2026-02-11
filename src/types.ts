@@ -27,6 +27,7 @@ export interface TranslateKitConfig {
   sourceLocale: string;
   targetLocales: string[];
   messagesDir: string;
+  splitByNamespace?: boolean;
   translation?: TranslationOptions;
   scan?: ScanOptions;
   inline?: InlineOptions;

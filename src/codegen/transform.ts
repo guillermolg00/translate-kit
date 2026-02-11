@@ -52,6 +52,7 @@ export interface TransformResult {
   code: string;
   stringsWrapped: number;
   modified: boolean;
+  usedKeys: string[];
 }
 
 export interface TransformOptions {
@@ -59,6 +60,28 @@ export interface TransformOptions {
   mode?: "keys" | "inline";
   componentPath?: string;
   forceClient?: boolean;
+}
+
+export function detectNamespace(keys: string[]): string | null {
+  if (keys.length === 0) return null;
+
+  const prefixes = keys.map((k) => {
+    const dot = k.indexOf(".");
+    return dot > 0 ? k.slice(0, dot) : null;
+  });
+
+  // All keys must have a dot-separated prefix and share the same one
+  if (prefixes.some((p) => p === null)) return null;
+
+  const first = prefixes[0];
+  if (prefixes.every((p) => p === first)) return first;
+
+  return null;
+}
+
+function stripNamespace(key: string, ns: string): string {
+  const prefix = ns + ".";
+  return key.startsWith(prefix) ? key.slice(prefix.length) : key;
 }
 
 function hasUseTranslationsImport(ast: File, importSource: string): boolean {
@@ -99,6 +122,28 @@ function hasGetTranslationsImport(ast: File, importSource: string): boolean {
     }
   }
   return false;
+}
+
+function collectConditionalKeys(
+  node: t.Expression,
+  textToKey: Record<string, string>,
+): string[] {
+  const keys: string[] = [];
+  if (node.type === "ConditionalExpression") {
+    keys.push(
+      ...collectConditionalKeys(node.consequent as t.Expression, textToKey),
+    );
+    keys.push(
+      ...collectConditionalKeys(node.alternate as t.Expression, textToKey),
+    );
+  } else if (node.type === "StringLiteral") {
+    const text = node.value.trim();
+    if (text && text in textToKey) keys.push(textToKey[text]);
+  } else if (node.type === "TemplateLiteral") {
+    const info = buildTemplateLiteralText(node.quasis, node.expressions);
+    if (info && info.text in textToKey) keys.push(textToKey[info.text]);
+  }
+  return keys;
 }
 
 function transformConditionalBranch(
@@ -228,6 +273,22 @@ export function transform(
     !supportsServerSplit || options.forceClient || detectClientFile(ast);
   let stringsWrapped = 0;
   const componentsNeedingT = new Set<string>();
+  const componentKeys = new Map<string, Set<string>>();
+  const allUsedKeys: string[] = [];
+
+  function trackKey(path: NodePath, key: string): void {
+    allUsedKeys.push(key);
+    const compName = getComponentName(path);
+    if (compName) {
+      componentsNeedingT.add(compName);
+      let keys = componentKeys.get(compName);
+      if (!keys) {
+        keys = new Set();
+        componentKeys.set(compName, keys);
+      }
+      keys.add(key);
+    }
+  }
 
   traverse(ast, {
     JSXText(path: NodePath<t.JSXText>) {
@@ -260,9 +321,7 @@ export function transform(
       }
 
       stringsWrapped++;
-
-      const compName = getComponentName(path);
-      if (compName) componentsNeedingT.add(compName);
+      trackKey(path, key);
     },
 
     JSXExpressionContainer(path: NodePath<t.JSXExpressionContainer>) {
@@ -274,8 +333,10 @@ export function transform(
         if (result.count > 0) {
           path.node.expression = result.node;
           stringsWrapped += result.count;
-          const compName = getComponentName(path);
-          if (compName) componentsNeedingT.add(compName);
+          // Collect keys from conditional branches
+          collectConditionalKeys(expr, textToKey).forEach((k) =>
+            trackKey(path, k),
+          );
         }
         return;
       }
@@ -295,9 +356,7 @@ export function transform(
       }
       path.node.expression = t.callExpression(t.identifier("t"), args);
       stringsWrapped++;
-
-      const compName = getComponentName(path);
-      if (compName) componentsNeedingT.add(compName);
+      trackKey(path, key);
     },
 
     JSXAttribute(path: NodePath<t.JSXAttribute>) {
@@ -312,8 +371,9 @@ export function transform(
         if (result.count > 0) {
           path.node.value = t.jsxExpressionContainer(result.node);
           stringsWrapped += result.count;
-          const compName = getComponentName(path);
-          if (compName) componentsNeedingT.add(compName);
+          collectConditionalKeys(value.expression, textToKey).forEach((k) =>
+            trackKey(path, k),
+          );
         }
         return;
       }
@@ -371,9 +431,7 @@ export function transform(
         t.callExpression(t.identifier("t"), args),
       );
       stringsWrapped++;
-
-      const compName = getComponentName(path);
-      if (compName) componentsNeedingT.add(compName);
+      trackKey(path, key);
     },
 
     ObjectProperty(path: NodePath<t.ObjectProperty>) {
@@ -396,7 +454,9 @@ export function transform(
         if (result.count > 0) {
           path.node.value = result.node;
           stringsWrapped += result.count;
-          componentsNeedingT.add(compName);
+          collectConditionalKeys(valueNode, textToKey).forEach((k) =>
+            trackKey(path, k),
+          );
         }
         return;
       }
@@ -439,14 +499,26 @@ export function transform(
       }
       path.node.value = t.callExpression(t.identifier("t"), args);
       stringsWrapped++;
-
-      componentsNeedingT.add(compName);
+      trackKey(path, key);
     },
   });
 
   if (stringsWrapped === 0) {
-    return { code: generate(ast).code, stringsWrapped: 0, modified: false };
+    return {
+      code: generate(ast).code,
+      stringsWrapped: 0,
+      modified: false,
+      usedKeys: [],
+    };
   }
+
+  // Compute namespace per component
+  const componentNamespaces = new Map<string, string | null>();
+  for (const [comp, keys] of componentKeys) {
+    componentNamespaces.set(comp, detectNamespace([...keys]));
+  }
+
+  const namespacedComponents = new Set<string>();
 
   if (isClient) {
     if (!hasUseTranslationsImport(ast, importSource)) {
@@ -472,7 +544,8 @@ export function transform(
       FunctionDeclaration(path: NodePath<t.FunctionDeclaration>) {
         const name = path.node.id?.name;
         if (!name || !componentsNeedingT.has(name)) return;
-        injectTDeclaration(path);
+        const ns = componentNamespaces.get(name) ?? undefined;
+        if (injectTDeclaration(path, ns)) namespacedComponents.add(name);
       },
       VariableDeclarator(path: NodePath<t.VariableDeclarator>) {
         if (path.node.id.type !== "Identifier") return;
@@ -487,7 +560,8 @@ export function transform(
           init.type === "FunctionExpression"
         ) {
           if (init.body.type === "BlockStatement") {
-            injectTIntoBlock(init.body);
+            const ns = componentNamespaces.get(name) ?? undefined;
+            if (injectTIntoBlock(init.body, ns)) namespacedComponents.add(name);
           }
         }
       },
@@ -519,7 +593,9 @@ export function transform(
         const name = path.node.id?.name;
         if (!name || !componentsNeedingT.has(name)) return;
         path.node.async = true;
-        injectAsyncTIntoBlock(path.node.body);
+        const ns = componentNamespaces.get(name) ?? undefined;
+        if (injectAsyncTIntoBlock(path.node.body, ns))
+          namespacedComponents.add(name);
       },
       VariableDeclarator(path: NodePath<t.VariableDeclarator>) {
         if (path.node.id.type !== "Identifier") return;
@@ -535,7 +611,9 @@ export function transform(
         ) {
           init.async = true;
           if (init.body.type === "BlockStatement") {
-            injectAsyncTIntoBlock(init.body);
+            const ns = componentNamespaces.get(name) ?? undefined;
+            if (injectAsyncTIntoBlock(init.body, ns))
+              namespacedComponents.add(name);
           }
         }
       },
@@ -543,79 +621,169 @@ export function transform(
     });
   }
 
+  // Rewrite keys to strip namespace prefix only for components where namespace was established
+  const effectiveNamespaces = new Map<string, string | null>();
+  for (const [comp, ns] of componentNamespaces) {
+    effectiveNamespaces.set(comp, namespacedComponents.has(comp) ? ns : null);
+  }
+  rewriteKeysForNamespaces(ast, effectiveNamespaces);
+
   const output = generate(ast, { retainLines: false });
-  return { code: output.code, stringsWrapped, modified: true };
+  return {
+    code: output.code,
+    stringsWrapped,
+    modified: true,
+    usedKeys: allUsedKeys,
+  };
 }
 
-function injectTDeclaration(path: NodePath<t.FunctionDeclaration>): void {
+function injectTDeclaration(
+  path: NodePath<t.FunctionDeclaration>,
+  namespace?: string,
+): boolean {
   const body = path.node.body;
-  if (body.type !== "BlockStatement") return;
-  injectTIntoBlock(body);
+  if (body.type !== "BlockStatement") return false;
+  return injectTIntoBlock(body, namespace);
 }
 
-function injectTIntoBlock(block: t.BlockStatement): void {
+function updateCallNamespace(
+  call: t.CallExpression,
+  namespace: string | undefined,
+): boolean {
+  if (!namespace) return false;
+  const currentArg = call.arguments[0];
+  if (
+    currentArg &&
+    currentArg.type === "StringLiteral" &&
+    currentArg.value === namespace
+  ) {
+    return true; // Already correct
+  }
+  call.arguments = [t.stringLiteral(namespace)];
+  return true;
+}
+
+function injectTIntoBlock(
+  block: t.BlockStatement,
+  namespace?: string,
+): boolean {
   for (const stmt of block.body) {
-    if (
-      stmt.type === "VariableDeclaration" &&
-      stmt.declarations.some(
-        (d) =>
-          d.id.type === "Identifier" &&
-          d.id.name === "t" &&
-          ((d.init?.type === "CallExpression" &&
-            d.init.callee.type === "Identifier" &&
-            (d.init.callee.name === "useTranslations" ||
-              d.init.callee.name === "getTranslations")) ||
-            (d.init?.type === "AwaitExpression" &&
-              d.init.argument.type === "CallExpression" &&
-              d.init.argument.callee.type === "Identifier" &&
-              d.init.argument.callee.name === "getTranslations")),
-      )
-    ) {
-      return;
+    if (stmt.type !== "VariableDeclaration") continue;
+    for (const d of stmt.declarations) {
+      if (d.id.type !== "Identifier" || d.id.name !== "t") continue;
+
+      // const t = useTranslations(...) or const t = getTranslations(...)
+      if (
+        d.init?.type === "CallExpression" &&
+        d.init.callee.type === "Identifier" &&
+        (d.init.callee.name === "useTranslations" ||
+          d.init.callee.name === "getTranslations")
+      ) {
+        return updateCallNamespace(d.init, namespace);
+      }
+
+      // const t = await getTranslations(...)
+      if (
+        d.init?.type === "AwaitExpression" &&
+        d.init.argument.type === "CallExpression" &&
+        d.init.argument.callee.type === "Identifier" &&
+        d.init.argument.callee.name === "getTranslations"
+      ) {
+        return updateCallNamespace(d.init.argument, namespace);
+      }
     }
   }
 
+  const args: t.Expression[] = namespace ? [t.stringLiteral(namespace)] : [];
   const tDecl = t.variableDeclaration("const", [
     t.variableDeclarator(
       t.identifier("t"),
-      t.callExpression(t.identifier("useTranslations"), []),
+      t.callExpression(t.identifier("useTranslations"), args),
     ),
   ]);
 
   block.body.unshift(tDecl);
+  return !!namespace;
 }
 
-function injectAsyncTIntoBlock(block: t.BlockStatement): void {
+function injectAsyncTIntoBlock(
+  block: t.BlockStatement,
+  namespace?: string,
+): boolean {
   for (const stmt of block.body) {
-    if (
-      stmt.type === "VariableDeclaration" &&
-      stmt.declarations.some(
-        (d) =>
-          d.id.type === "Identifier" &&
-          d.id.name === "t" &&
-          ((d.init?.type === "AwaitExpression" &&
-            d.init.argument.type === "CallExpression" &&
-            d.init.argument.callee.type === "Identifier" &&
-            d.init.argument.callee.name === "getTranslations") ||
-            (d.init?.type === "CallExpression" &&
-              d.init.callee.type === "Identifier" &&
-              d.init.callee.name === "getTranslations")),
-      )
-    ) {
-      return;
+    if (stmt.type !== "VariableDeclaration") continue;
+    for (const d of stmt.declarations) {
+      if (d.id.type !== "Identifier" || d.id.name !== "t") continue;
+
+      // const t = await getTranslations(...)
+      if (
+        d.init?.type === "AwaitExpression" &&
+        d.init.argument.type === "CallExpression" &&
+        d.init.argument.callee.type === "Identifier" &&
+        d.init.argument.callee.name === "getTranslations"
+      ) {
+        return updateCallNamespace(d.init.argument, namespace);
+      }
+
+      // const t = getTranslations(...)
+      if (
+        d.init?.type === "CallExpression" &&
+        d.init.callee.type === "Identifier" &&
+        d.init.callee.name === "getTranslations"
+      ) {
+        return updateCallNamespace(d.init, namespace);
+      }
     }
   }
 
+  const args: t.Expression[] = namespace ? [t.stringLiteral(namespace)] : [];
   const tDecl = t.variableDeclaration("const", [
     t.variableDeclarator(
       t.identifier("t"),
       t.awaitExpression(
-        t.callExpression(t.identifier("getTranslations"), []),
+        t.callExpression(t.identifier("getTranslations"), args),
       ),
     ),
   ]);
 
   block.body.unshift(tDecl);
+  return !!namespace;
+}
+
+function rewriteKeysForNamespaces(
+  ast: File,
+  componentNamespaces: Map<string, string | null>,
+): void {
+  // Collect component names that actually have a namespace
+  const nsComponents = new Map<string, string>();
+  for (const [comp, ns] of componentNamespaces) {
+    if (ns) nsComponents.set(comp, ns);
+  }
+  if (nsComponents.size === 0) return;
+
+  traverse(ast, {
+    CallExpression(path: NodePath<t.CallExpression>) {
+      if (
+        path.node.callee.type !== "Identifier" ||
+        path.node.callee.name !== "t"
+      )
+        return;
+      if (path.node.arguments.length === 0) return;
+      const firstArg = path.node.arguments[0];
+      if (firstArg.type !== "StringLiteral") return;
+
+      const compName = getComponentName(path);
+      if (!compName) return;
+      const ns = nsComponents.get(compName);
+      if (!ns) return;
+
+      const stripped = stripNamespace(firstArg.value, ns);
+      if (stripped !== firstArg.value) {
+        firstArg.value = stripped;
+      }
+    },
+    noScope: true,
+  });
 }
 
 export function detectClientFile(ast: File): boolean {
@@ -644,7 +812,13 @@ export function detectClientFile(ast: File): boolean {
     CallExpression(path: NodePath<t.CallExpression>) {
       if (usesHooks) return;
       const callee = path.node.callee;
-      if (callee.type === "Identifier" && /^use[A-Z]/.test(callee.name)) {
+      if (
+        callee.type === "Identifier" &&
+        /^use[A-Z]/.test(callee.name) &&
+        // Exclude translate-kit's inline mode hook — it is normalised
+        // by codegen and should not force client detection.
+        callee.name !== "useT"
+      ) {
         usesHooks = true;
       }
     },
@@ -694,6 +868,7 @@ function normalizeInlineImports(
   ]);
   const desiredSource = isClient ? componentPath : `${componentPath}-server`;
   let changed = false;
+  let hookRenamed: { from: string; to: string } | undefined;
 
   for (const node of ast.program.body) {
     if (node.type !== "ImportDeclaration") continue;
@@ -713,15 +888,42 @@ function normalizeInlineImports(
       }
 
       if (isClient && spec.imported.name === "createT") {
+        hookRenamed = { from: "createT", to: "useT" };
         spec.imported = t.identifier("useT");
+        if (spec.local.type === "Identifier" && spec.local.name === "createT") {
+          spec.local = t.identifier("useT");
+        }
         changed = true;
       }
 
       if (!isClient && spec.imported.name === "useT") {
+        hookRenamed = { from: "useT", to: "createT" };
         spec.imported = t.identifier("createT");
+        if (spec.local.type === "Identifier" && spec.local.name === "useT") {
+          spec.local = t.identifier("createT");
+        }
         changed = true;
       }
     }
+  }
+
+  // Rename call expressions in function bodies to match the updated import
+  if (hookRenamed) {
+    const { from, to } = hookRenamed;
+    traverse(ast, {
+      VariableDeclarator(path: NodePath<t.VariableDeclarator>) {
+        if (
+          path.node.id.type === "Identifier" &&
+          path.node.id.name === "t" &&
+          path.node.init?.type === "CallExpression" &&
+          path.node.init.callee.type === "Identifier" &&
+          path.node.init.callee.name === from
+        ) {
+          path.node.init.callee = t.identifier(to);
+        }
+      },
+      noScope: true,
+    });
   }
 
   return changed;
@@ -1000,12 +1202,22 @@ function transformInline(
   });
 
   if (stringsWrapped === 0 && !repaired && !boundaryRepaired) {
-    return { code: generate(ast).code, stringsWrapped: 0, modified: false };
+    return {
+      code: generate(ast).code,
+      stringsWrapped: 0,
+      modified: false,
+      usedKeys: [],
+    };
   }
 
   if (stringsWrapped === 0 && (repaired || boundaryRepaired)) {
     const output = generate(ast, { retainLines: false });
-    return { code: output.code, stringsWrapped: 0, modified: true };
+    return {
+      code: output.code,
+      stringsWrapped: 0,
+      modified: true,
+      usedKeys: [],
+    };
   }
 
   const needsHook = componentsNeedingT.size > 0;
@@ -1100,26 +1312,32 @@ function transformInline(
   }
 
   const output = generate(ast, { retainLines: false });
-  return { code: output.code, stringsWrapped, modified: true };
+  return { code: output.code, stringsWrapped, modified: true, usedKeys: [] };
 }
 
 function injectInlineHookIntoBlock(
   block: t.BlockStatement,
   hookCall: t.CallExpression,
 ): void {
+  const targetName =
+    hookCall.callee.type === "Identifier" ? hookCall.callee.name : undefined;
+
   for (const stmt of block.body) {
-    if (
-      stmt.type === "VariableDeclaration" &&
-      stmt.declarations.some(
-        (d) =>
-          d.id.type === "Identifier" &&
-          d.id.name === "t" &&
-          d.init?.type === "CallExpression" &&
-          d.init.callee.type === "Identifier" &&
-          (d.init.callee.name === "useT" || d.init.callee.name === "createT"),
-      )
-    ) {
-      return;
+    if (stmt.type !== "VariableDeclaration") continue;
+    for (const d of stmt.declarations) {
+      if (
+        d.id.type === "Identifier" &&
+        d.id.name === "t" &&
+        d.init?.type === "CallExpression" &&
+        d.init.callee.type === "Identifier" &&
+        (d.init.callee.name === "useT" || d.init.callee.name === "createT")
+      ) {
+        // Fix the hook name if it doesn't match the expected one (boundary repair)
+        if (targetName && d.init.callee.name !== targetName) {
+          d.init.callee = t.identifier(targetName);
+        }
+        return;
+      }
     }
   }
 

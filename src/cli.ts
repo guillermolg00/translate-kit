@@ -7,6 +7,7 @@ import { loadJsonFile } from "./diff.js";
 import { scan } from "./scanner/index.js";
 import {
   loadMapFile,
+  loadSplitMessages,
   runScanStep,
   runCodegenStep,
   runTranslateStep,
@@ -26,7 +27,12 @@ import {
   logProgress,
   logProgressClear,
 } from "./logger.js";
-import { createUsageTracker, estimateCost, formatUsage, formatCost } from "./usage.js";
+import {
+  createUsageTracker,
+  estimateCost,
+  formatUsage,
+  formatCost,
+} from "./usage.js";
 import type { TranslationResult } from "./types.js";
 import { parseTranslateFlags, validateLocale } from "./cli-utils.js";
 
@@ -85,6 +91,9 @@ const translateCommand = defineCommand({
         for (const [text, key] of Object.entries(mapData)) {
           sourceFlat[key] = text;
         }
+      } else if (config.splitByNamespace) {
+        const sourceDir = join(messagesDir, sourceLocale);
+        sourceFlat = await loadSplitMessages(sourceDir);
       } else {
         const sourceFile = join(messagesDir, `${sourceLocale}.json`);
         const sourceRaw = await loadJsonFile(sourceFile);
@@ -123,6 +132,9 @@ const translateCommand = defineCommand({
       for (const [text, key] of Object.entries(mapData)) {
         sourceFlat[key] = text;
       }
+    } else if (config.splitByNamespace) {
+      const sourceDir = join(messagesDir, sourceLocale);
+      sourceFlat = await loadSplitMessages(sourceDir);
     } else {
       const sourceFile = join(messagesDir, `${sourceLocale}.json`);
       const sourceRaw = await loadJsonFile(sourceFile);
@@ -174,7 +186,10 @@ const translateCommand = defineCommand({
     const usage = usageTracker.get();
     if (usage.totalTokens > 0) {
       const cost = await estimateCost(model, usage);
-      logUsage(formatUsage(usage), cost ? formatCost(cost.totalUSD) : undefined);
+      logUsage(
+        formatUsage(usage),
+        cost ? formatCost(cost.totalUSD) : undefined,
+      );
     }
   },
 });
@@ -248,9 +263,17 @@ const scanCommand = defineCommand({
       `Written .translate-map.json (${Object.keys(scanResult.textToKey).length} keys)`,
     );
 
-    if (mode === "inline") {
+    if (mode === "inline" && config.splitByNamespace) {
+      logInfo(
+        "Inline mode + split: source text stays in code, translations split by namespace.",
+      );
+    } else if (mode === "inline") {
       logInfo(
         "Inline mode: source text stays in code, no source locale JSON created.",
+      );
+    } else if (config.splitByNamespace) {
+      logSuccess(
+        `Written to ${join(config.messagesDir, config.sourceLocale)}/`,
       );
     } else {
       const sourceFile = join(
@@ -263,7 +286,10 @@ const scanCommand = defineCommand({
     const scanUsage = scanUsageTracker.get();
     if (scanUsage.totalTokens > 0) {
       const cost = await estimateCost(config.model, scanUsage);
-      logUsage(formatUsage(scanUsage), cost ? formatCost(cost.totalUSD) : undefined);
+      logUsage(
+        formatUsage(scanUsage),
+        cost ? formatCost(cost.totalUSD) : undefined,
+      );
     }
   },
 });
@@ -296,7 +322,9 @@ const codegenCommand = defineCommand({
       const textToKey = await loadMapFile(config.messagesDir);
 
       if (Object.keys(textToKey).length === 0) {
-        logError("No .translate-map.json found. Run 'translate-kit scan' first.");
+        logError(
+          "No .translate-map.json found. Run 'translate-kit scan' first.",
+        );
         process.exit(1);
       }
 

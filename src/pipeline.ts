@@ -1,13 +1,14 @@
 import { join } from "node:path";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, readdir, writeFile, mkdir } from "node:fs/promises";
 import { scan } from "./scanner/index.js";
 import { generateSemanticKeys } from "./scanner/key-ai.js";
 import { codegen, type CodegenResult } from "./codegen/index.js";
 import { translateAll } from "./translate.js";
-import { writeTranslation, writeLockFile } from "./writer.js";
+import { writeTranslation, writeTranslationSplit, writeLockFile } from "./writer.js";
 import { loadJsonFile, loadLockFile, computeDiff } from "./diff.js";
 import { flatten, unflatten } from "./flatten.js";
 import { logWarning } from "./logger.js";
+import { generateNextIntlTypes } from "./typegen.js";
 import type { TranslateKitConfig } from "./types.js";
 
 // --- Map file helpers (moved from cli.ts) ---
@@ -40,6 +41,32 @@ export async function writeMapFile(
   await mkdir(messagesDir, { recursive: true });
   const content = JSON.stringify(map, null, 2) + "\n";
   await writeFile(mapPath, content, "utf-8");
+}
+
+export async function loadSplitMessages(
+  dir: string,
+): Promise<Record<string, string>> {
+  let files: string[];
+  try {
+    files = await readdir(dir);
+  } catch {
+    return {};
+  }
+
+  const flat: Record<string, string> = {};
+  for (const file of files.filter((f) => f.endsWith(".json"))) {
+    const ns = file.replace(".json", "");
+    const raw = await loadJsonFile(join(dir, file));
+    const nsFlat = flatten(raw);
+    for (const [key, value] of Object.entries(nsFlat)) {
+      if (ns === "_root") {
+        flat[key] = value;
+      } else {
+        flat[`${ns}.${key}`] = value;
+      }
+    }
+  }
+  return flat;
 }
 
 // --- Scan step ---
@@ -124,14 +151,20 @@ export async function runScanStep(
   }
 
   if (mode !== "inline") {
-    const sourceFile = join(
-      config.messagesDir,
-      `${config.sourceLocale}.json`,
-    );
-    await mkdir(config.messagesDir, { recursive: true });
-    const nested = unflatten(sourceFlat);
-    const content = JSON.stringify(nested, null, 2) + "\n";
-    await writeFile(sourceFile, content, "utf-8");
+    if (config.splitByNamespace) {
+      const sourceDir = join(config.messagesDir, config.sourceLocale);
+      await writeTranslationSplit(sourceDir, sourceFlat);
+    } else {
+      const sourceFile = join(
+        config.messagesDir,
+        `${config.sourceLocale}.json`,
+      );
+      await mkdir(config.messagesDir, { recursive: true });
+      const nested = unflatten(sourceFlat);
+      const content = JSON.stringify(nested, null, 2) + "\n";
+      await writeFile(sourceFile, content, "utf-8");
+    }
+    await generateNextIntlTypes(config.messagesDir, config.sourceLocale, config.splitByNamespace);
   }
 
   return {
@@ -230,6 +263,9 @@ export async function runTranslateStep(
       for (const [text, key] of Object.entries(mapData)) {
         sourceFlat[key] = text;
       }
+    } else if (config.splitByNamespace) {
+      const sourceDir = join(config.messagesDir, config.sourceLocale);
+      sourceFlat = await loadSplitMessages(sourceDir);
     } else {
       const sourceFile = join(
         config.messagesDir,
@@ -244,10 +280,16 @@ export async function runTranslateStep(
 
   for (const locale of locales) {
     const start = Date.now();
-    const targetFile = join(config.messagesDir, `${locale}.json`);
+    let targetFlat: Record<string, string>;
 
-    const targetRaw = await loadJsonFile(targetFile);
-    const targetFlat = flatten(targetRaw);
+    if (config.splitByNamespace) {
+      const targetDir = join(config.messagesDir, locale);
+      targetFlat = await loadSplitMessages(targetDir);
+    } else {
+      const targetFile = join(config.messagesDir, `${locale}.json`);
+      const targetRaw = await loadJsonFile(targetFile);
+      targetFlat = flatten(targetRaw);
+    }
 
     let lockData = await loadLockFile(config.messagesDir);
     if (input.force) {
@@ -309,9 +351,15 @@ export async function runTranslateStep(
       ...translated,
     };
 
-    await writeTranslation(targetFile, finalFlat, {
-      flat: mode === "inline",
-    });
+    if (config.splitByNamespace) {
+      const targetDir = join(config.messagesDir, locale);
+      await writeTranslationSplit(targetDir, finalFlat);
+    } else {
+      const targetFile = join(config.messagesDir, `${locale}.json`);
+      await writeTranslation(targetFile, finalFlat, {
+        flat: mode === "inline",
+      });
+    }
 
     const allTranslatedKeys = Object.keys(finalFlat);
     const currentLock = await loadLockFile(config.messagesDir);

@@ -35,7 +35,9 @@ describe("codegen integration", () => {
     expect(result.filesSkipped).toBe(0);
 
     const content = await readFile(filePath, "utf-8");
-    expect(content).toContain('t("page.hello")');
+    // Single namespace "page" → key stripped to "hello"
+    expect(content).toContain('t("hello")');
+    expect(content).toContain('getTranslations("page")');
   });
 
   it("skips file when transform produces invalid syntax", async () => {
@@ -146,5 +148,75 @@ export default function Page() { return <Logo />; }`,
     expect(logoOut).not.toContain("t-server");
     expect(logoOut).toContain("useT");
     expect(logoOut).toContain('t("Mimir Logo", "common.mimirLogo")');
+  });
+
+  it("returns clientNamespaces for client files", async () => {
+    const filePath = join(tempDir, "page.tsx");
+    await writeFile(
+      filePath,
+      `"use client";
+export default function Page() {
+  return <div><h1>Welcome</h1><p>Get started</p></div>;
+}`,
+      "utf-8",
+    );
+
+    const result = await codegen(
+      {
+        include: ["**/*.tsx"],
+        textToKey: { Welcome: "hero.welcome", "Get started": "hero.getStarted" },
+      },
+      tempDir,
+    );
+
+    expect(result.filesModified).toBe(1);
+    expect(result.clientNamespaces).toEqual(["hero"]);
+  });
+
+  it("returns empty clientNamespaces for server-only files", async () => {
+    const filePath = join(tempDir, "page.tsx");
+    await writeFile(
+      filePath,
+      `export default function Page() { return <h1>Hello World</h1>; }`,
+      "utf-8",
+    );
+
+    const result = await codegen(
+      {
+        include: ["**/*.tsx"],
+        textToKey: { "Hello World": "page.hello" },
+      },
+      tempDir,
+    );
+
+    expect(result.filesModified).toBe(1);
+    expect(result.clientNamespaces).toEqual([]);
+  });
+
+  it("collects multiple client namespaces across files", async () => {
+    const file1 = join(tempDir, "hero.tsx");
+    const file2 = join(tempDir, "nav.tsx");
+    await writeFile(
+      file1,
+      `"use client";
+export function Hero() { return <h1>Welcome</h1>; }`,
+      "utf-8",
+    );
+    await writeFile(
+      file2,
+      `"use client";
+export function Nav() { return <nav>Home</nav>; }`,
+      "utf-8",
+    );
+
+    const result = await codegen(
+      {
+        include: ["**/*.tsx"],
+        textToKey: { Welcome: "hero.welcome", Home: "nav.home" },
+      },
+      tempDir,
+    );
+
+    expect(result.clientNamespaces).toEqual(["hero", "nav"]);
   });
 });

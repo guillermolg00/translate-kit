@@ -71,11 +71,12 @@ describe("generateSemanticKeys", () => {
   });
 
   it("generates semantic keys for strings", async () => {
+    // After sort by file: LoginForm(0), EditModal(1), Hero(2), SearchBar(3)
     vi.mocked(generateObject).mockResolvedValueOnce(
       makeMockResponse([
         { index: 0, key: "auth.signIn" },
-        { index: 1, key: "hero.welcome" },
-        { index: 2, key: "common.save" },
+        { index: 1, key: "common.save" },
+        { index: 2, key: "hero.welcome" },
         { index: 3, key: "common.searchPlaceholder" },
       ]),
     );
@@ -96,10 +97,11 @@ describe("generateSemanticKeys", () => {
       "Sign in": "auth.signIn",
     };
 
+    // After sort by file (without Sign in): EditModal(0), Hero(1), SearchBar(2)
     vi.mocked(generateObject).mockResolvedValueOnce(
       makeMockResponse([
-        { index: 0, key: "hero.welcome" },
-        { index: 1, key: "common.save" },
+        { index: 0, key: "common.save" },
+        { index: 1, key: "hero.welcome" },
         { index: 2, key: "common.searchPlaceholder" },
       ]),
     );
@@ -362,5 +364,173 @@ describe("generateSemanticKeys", () => {
     const prompt = call.prompt as string;
     expect(prompt).toContain("route: dashboard");
     expect(prompt).toContain('siblings: ["Welcome back", "Your stats"]');
+  });
+
+  it("groups strings by file in the prompt", async () => {
+    vi.mocked(generateObject).mockResolvedValueOnce(
+      makeMockResponse([
+        { index: 0, key: "auth.signIn" },
+        { index: 1, key: "hero.welcome" },
+        { index: 2, key: "editModal.save" },
+        { index: 3, key: "searchBar.placeholder" },
+      ]),
+    );
+
+    await generateSemanticKeys({
+      model: mockModel,
+      strings: mockStrings,
+    });
+
+    const call = vi.mocked(generateObject).mock.calls[0][0];
+    const prompt = call.prompt as string;
+    expect(prompt).toContain("--- File: src/auth/LoginForm.tsx ---");
+    expect(prompt).toContain("--- File: src/components/Hero.tsx ---");
+    expect(prompt).toContain("--- File: src/components/EditModal.tsx ---");
+    expect(prompt).toContain("--- File: src/components/SearchBar.tsx ---");
+  });
+
+  it("includes existing keys context in prompt", async () => {
+    const existingMap = {
+      "Sign in": "auth.signIn",
+    };
+
+    vi.mocked(generateObject).mockResolvedValueOnce(
+      makeMockResponse([
+        { index: 0, key: "hero.welcome" },
+        { index: 1, key: "editModal.save" },
+        { index: 2, key: "searchBar.placeholder" },
+      ]),
+    );
+
+    await generateSemanticKeys({
+      model: mockModel,
+      strings: mockStrings,
+      existingMap,
+    });
+
+    const call = vi.mocked(generateObject).mock.calls[0][0];
+    const prompt = call.prompt as string;
+    expect(prompt).toContain("Existing keys (maintain consistency with these namespaces):");
+    expect(prompt).toContain('"Sign in" → auth.signIn');
+  });
+
+  it("includes namespace-per-component rules in prompt", async () => {
+    vi.mocked(generateObject).mockResolvedValueOnce(
+      makeMockResponse([
+        { index: 0, key: "auth.signIn" },
+        { index: 1, key: "hero.welcome" },
+        { index: 2, key: "editModal.save" },
+        { index: 3, key: "searchBar.placeholder" },
+      ]),
+    );
+
+    await generateSemanticKeys({
+      model: mockModel,
+      strings: mockStrings,
+    });
+
+    const call = vi.mocked(generateObject).mock.calls[0][0];
+    const prompt = call.prompt as string;
+    expect(prompt).toContain("CRITICAL: All strings within the same React component MUST share the same namespace prefix");
+    expect(prompt).toContain("Derive namespace from: route path > component name > file path section");
+    expect(prompt).toContain("Only use cross-cutting namespaces");
+  });
+
+  it("resolves path conflicts where a key is both leaf and branch", async () => {
+    // AI generates "integrations.integration" as a leaf
+    // AND "integrations.integration.name" as another key
+    // → "integrations.integration" must be renamed to avoid unflatten conflict
+    const conflictStrings: ExtractedString[] = [
+      {
+        text: "Integration",
+        type: "jsx-text",
+        file: "src/Integrations.tsx",
+        line: 1,
+        column: 0,
+        componentName: "Integrations",
+        parentTag: "h2",
+      },
+      {
+        text: "Integration Name",
+        type: "jsx-text",
+        file: "src/Integrations.tsx",
+        line: 2,
+        column: 0,
+        componentName: "Integrations",
+        parentTag: "span",
+      },
+      {
+        text: "Integration Description",
+        type: "jsx-text",
+        file: "src/Integrations.tsx",
+        line: 3,
+        column: 0,
+        componentName: "Integrations",
+        parentTag: "p",
+      },
+    ];
+
+    vi.mocked(generateObject).mockResolvedValueOnce(
+      makeMockResponse([
+        { index: 0, key: "integrations.integration" },
+        { index: 1, key: "integrations.integration.name" },
+        { index: 2, key: "integrations.integration.description" },
+      ]),
+    );
+
+    const result = await generateSemanticKeys({
+      model: mockModel,
+      strings: conflictStrings,
+    });
+
+    // The leaf key should be renamed to avoid conflict
+    expect(result["Integration"]).toBe("integrations.integrationLabel");
+    // Child keys remain unchanged
+    expect(result["Integration Name"]).toBe("integrations.integration.name");
+    expect(result["Integration Description"]).toBe(
+      "integrations.integration.description",
+    );
+  });
+
+  it("sorts strings by file and component before batching", async () => {
+    const unorderedStrings: ExtractedString[] = [
+      {
+        text: "Zebra",
+        type: "jsx-text",
+        file: "src/z/ZPage.tsx",
+        line: 1,
+        column: 0,
+        componentName: "ZPage",
+        parentTag: "h1",
+      },
+      {
+        text: "Alpha",
+        type: "jsx-text",
+        file: "src/a/APage.tsx",
+        line: 1,
+        column: 0,
+        componentName: "APage",
+        parentTag: "h1",
+      },
+    ];
+
+    vi.mocked(generateObject).mockResolvedValueOnce(
+      makeMockResponse([
+        { index: 0, key: "aPage.alpha" },
+        { index: 1, key: "zPage.zebra" },
+      ]),
+    );
+
+    await generateSemanticKeys({
+      model: mockModel,
+      strings: unorderedStrings,
+    });
+
+    const call = vi.mocked(generateObject).mock.calls[0][0];
+    const prompt = call.prompt as string;
+    // After sorting, APage should appear before ZPage
+    const aPos = prompt.indexOf("--- File: src/a/APage.tsx ---");
+    const zPos = prompt.indexOf("--- File: src/z/ZPage.tsx ---");
+    expect(aPos).toBeLessThan(zPos);
   });
 });
