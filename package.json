@@ -1,7 +1,7 @@
 {
   "name": "translate-kit",
-  "version": "0.3.1",
-  "description": "AI-powered translation SDK for build time. Compatible with next-intl.",
+  "version": "0.4.0",
+  "description": "AI-powered i18n pipeline for build time. Scan, transform, and translate JSX/TSX with any AI model. Zero runtime cost. Compatible with next-intl.",
   "type": "module",
   "license": "MIT",
   "author": "guillermolg00",
@@ -20,7 +20,12 @@
     "translation",
     "build-time",
     "vercel-ai-sdk",
-    "localization"
+    "localization",
+    "nextjs",
+    "ai-translation",
+    "codegen",
+    "ast",
+    "jsx"
   ],
   "engines": {
     "node": ">=18"

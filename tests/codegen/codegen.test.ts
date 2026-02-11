@@ -148,6 +148,110 @@ export default function Page() { return <Logo />; }`,
     expect(logoOut).not.toContain("t-server");
     expect(logoOut).toContain("useT");
     expect(logoOut).toContain('t("Mimir Logo", "common.mimirLogo")');
+    expect(logoOut).toContain('"use client"');
+  });
+
+  it("forces client inline runtime through dynamic import dependencies", async () => {
+    const appDir = join(tempDir, "src", "app");
+    const componentsDir = join(tempDir, "src", "components");
+    await mkdir(appDir, { recursive: true });
+    await mkdir(componentsDir, { recursive: true });
+
+    const clientPage = join(appDir, "page.tsx");
+    const logoFile = join(componentsDir, "logo.tsx");
+
+    await writeFile(
+      clientPage,
+      `"use client";
+export default function Page() {
+  void import("../components/logo");
+  return null;
+}`,
+      "utf-8",
+    );
+
+    await writeFile(
+      logoFile,
+      `export function Logo() { return <img alt="Mimir Logo" />; }`,
+      "utf-8",
+    );
+
+    const result = await codegen(
+      {
+        include: ["src/**/*.tsx"],
+        mode: "inline",
+        componentPath: "@/components/t",
+        textToKey: { "Mimir Logo": "common.mimirLogo" },
+      },
+      tempDir,
+    );
+
+    expect(result.filesModified).toBe(1);
+
+    const logoOut = await readFile(logoFile, "utf-8");
+    expect(logoOut).toContain('from "@/components/t"');
+    expect(logoOut).not.toContain("t-server");
+    expect(logoOut).toContain("useT");
+    expect(logoOut).toContain('t("Mimir Logo", "common.mimirLogo")');
+    expect(logoOut).toContain('"use client"');
+  });
+
+  it("resolves tsconfig path aliases in client dependency graph", async () => {
+    const appDir = join(tempDir, "src", "app");
+    const componentsDir = join(tempDir, "src", "components");
+    await mkdir(appDir, { recursive: true });
+    await mkdir(componentsDir, { recursive: true });
+
+    await writeFile(
+      join(tempDir, "tsconfig.json"),
+      JSON.stringify(
+        {
+          compilerOptions: {
+            baseUrl: ".",
+            paths: {
+              "@ui/*": ["src/components/*"],
+            },
+          },
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+
+    const clientPage = join(appDir, "page.tsx");
+    const logoFile = join(componentsDir, "logo.tsx");
+
+    await writeFile(
+      clientPage,
+      `"use client";
+import { Logo } from "@ui/logo";
+export default function Page() { return <Logo />; }`,
+      "utf-8",
+    );
+
+    await writeFile(
+      logoFile,
+      `export function Logo() { return <h1>Hello World</h1>; }`,
+      "utf-8",
+    );
+
+    const result = await codegen(
+      {
+        include: ["src/**/*.tsx"],
+        textToKey: { "Hello World": "hero.welcome" },
+      },
+      tempDir,
+    );
+
+    expect(result.filesModified).toBe(1);
+
+    const logoOut = await readFile(logoFile, "utf-8");
+    expect(logoOut).toContain('"use client"');
+    expect(logoOut).toContain('import { useTranslations } from "next-intl"');
+    expect(logoOut).toContain('const t = useTranslations("hero")');
+    expect(logoOut).toContain('t("welcome")');
+    expect(logoOut).not.toContain("getTranslations");
   });
 
   it("returns clientNamespaces for client files", async () => {

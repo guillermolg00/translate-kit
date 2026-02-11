@@ -22,7 +22,7 @@ The wizard guides you through:
 5. **Target locales** — languages to translate into
 6. **Messages directory** — where translation files live (default: `./messages`)
 7. **Include patterns** — which source files to scan (auto-detected)
-8. **i18n library** — the import source for `useTranslations` (keys mode only)
+8. **TypeScript type safety** — generate `next-intl.d.ts` for key autocomplete (keys mode only)
 9. **Component path** — import path for the `<T>` component (inline mode only)
 10. **Project context** — description for better translations
 11. **Tone** — translation style (professional, casual, etc.)
@@ -35,14 +35,15 @@ The wizard creates:
 
 ### Keys mode
 
-For next-intl projects, it can also create:
+In keys mode, the wizard also:
 
-- **`i18n/request.ts`** — locale detection setup
-- Updates to **`next.config.ts`** with `createNextIntlPlugin`
+- Installs **next-intl** automatically
+- Creates **`i18n/request.ts`** with locale detection setup
+- Updates **`next.config.ts`** with `createNextIntlPlugin`
 
 ### Inline mode
 
-For inline mode, the wizard also:
+In inline mode, the wizard also:
 
 - Copies **`t.tsx`** (client component) and **`t-server.tsx`** (server component) to your project
 - Creates **`src/i18n/index.ts`** with `getLocale()` and `getMessages()` helpers

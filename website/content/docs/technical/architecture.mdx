@@ -1,0 +1,82 @@
+---
+title: Architecture
+description: Pipeline, modules, and data flow.
+---
+
+translate-kit has two entry points: a CLI (`src/cli.ts`) and a library (`src/index.ts`). The CLI provides the user-facing commands, while the library exports `defineConfig` and pipeline functions for programmatic use.
+
+## Pipeline
+
+The core pipeline has three steps that can run independently or together:
+
+```
+scan → codegen → translate
+```
+
+### Data Flow
+
+```
+Source files (JSX/TSX)
+        │
+        ▼
+┌───────────────┐
+│     scan      │ → .translate-map.json (text → key mapping)
+│               │ → messages/en.json (source locale, keys mode)
+│               │ → next-intl.d.ts (if typeSafe: true)
+└───────────────┘
+        │
+        ▼
+┌───────────────┐
+│    codegen    │ → Modified source files (t() calls or <T> wrappers)
+└───────────────┘
+        │
+        ▼
+┌───────────────┐
+│   translate   │ → messages/es.json, messages/fr.json, ... (target locales)
+│               │ → .translate-lock.json (SHA-256 hashes for incremental)
+└───────────────┘
+```
+
+## Key Modules
+
+### Scanner (`src/scanner/`)
+
+Parses JSX/TSX files using Babel, extracts translatable strings from four categories (JSX text, attributes, expression containers, object properties), and filters non-translatable content (URLs, CSS classes, constants, etc.).
+
+- **`src/scanner/context-enricher.ts`** — adds route path and section context to extracted strings, giving the AI better information for key naming
+- **`src/scanner/key-ai.ts`** — AI-powered semantic key generation with batching and retries. Groups keys by namespace (e.g. `common.save`, `nav.dashboard`)
+
+### Codegen (`src/codegen/transform.ts`)
+
+Re-parses source files and transforms the AST to replace raw strings with `t("key")` calls (keys mode) or `<T id="key">text</T>` wrappers (inline mode). Detects namespaces, injects imports and hooks, and validates generated syntax by re-parsing before writing.
+
+### Translate (`src/translate.ts`)
+
+Loads source messages, computes a diff against `.translate-lock.json` (SHA-256 hashes), and only sends added/modified keys to the AI. Merges cached translations with new ones, validates placeholder preservation, and writes target locale JSON files.
+
+### Diff (`src/diff.ts`)
+
+Implements incremental translation via the lock file. Compares SHA-256 hashes of source values to detect added, modified, removed, and unchanged keys.
+
+### Pipeline (`src/pipeline.ts`)
+
+Orchestrates the three steps. Contains `runScanStep()`, `runCodegenStep()`, and `runTranslateStep()` — reusable functions used by both individual commands and the `run` command.
+
+### Config (`src/config.ts`)
+
+Loads `translate-kit.config.ts` via [c12](https://github.com/unjs/c12) and validates the schema with [Zod](https://zod.dev/). Supports `.ts`, `.js`, and `.json` config formats.
+
+### Init (`src/init.ts`)
+
+Interactive wizard that scaffolds the config file, installs dependencies, creates i18n helper files, and modifies the root layout. Optionally runs the full pipeline at the end.
+
+## Performance Optimizations
+
+- **Namespace scoping** — `useTranslations("namespace")` instead of loading all messages
+- **Selective message passing** — only serializes needed namespaces to the client bundle
+- **Per-namespace splitting** — `splitByNamespace: true` generates individual JSON files per namespace instead of one large file
+- **Type generation** — `typeSafe: true` auto-generates `next-intl.d.ts` for key autocomplete and compile-time validation
+
+## AI Integration
+
+All AI calls use Vercel AI SDK's `generateObject` with Zod schemas for structured output. The model is configured by the user in `translate-kit.config.ts` and can be any provider. Batch processing with configurable concurrency and retries is used for both key generation and translation.

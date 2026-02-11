@@ -121,6 +121,7 @@ export function generateConfigFile(opts: {
   mode: "keys" | "inline";
   componentPath?: string;
   splitByNamespace?: boolean;
+  typeSafe?: boolean;
 }): string {
   const provider = AI_PROVIDERS[opts.providerKey];
   const lines: string[] = [];
@@ -139,6 +140,9 @@ export function generateConfigFile(opts: {
   lines.push(`  messagesDir: "${opts.messagesDir}",`);
   if (opts.splitByNamespace) {
     lines.push(`  splitByNamespace: true,`);
+  }
+  if (opts.typeSafe) {
+    lines.push(`  typeSafe: true,`);
   }
 
   const hasTranslation = opts.context || opts.tone !== "neutral";
@@ -551,7 +555,7 @@ export async function updateLayoutWithSelectiveMessages(
     if (!content.includes("pickMessages")) {
       const helper = isInline
         ? '\nfunction pickMessages(messages: Record<string, string>, namespaces: string[]) {\n  return Object.fromEntries(\n    Object.entries(messages).filter(([key]) =>\n      namespaces.some(ns => key === ns || key.startsWith(ns + "."))\n    )\n  );\n}\n'
-        : '\nfunction pickMessages(messages: Record<string, unknown>, namespaces: string[]) {\n  return Object.fromEntries(Object.entries(messages).filter(([key]) => namespaces.includes(key)));\n}\n';
+        : '\nfunction pickMessages(messages: Record<string, unknown>, namespaces: string[]) {\n  return Object.fromEntries(Object.entries(messages).filter(([key]) => namespaces.includes(key) || (typeof messages[key] === "string" && namespaces.some(ns => key.startsWith(ns + ".")))));\n}\n';
       content = insertImportsAfterLast(content, helper);
     }
 
@@ -687,6 +691,7 @@ export async function runInitWizard(): Promise<void> {
 
   let i18nImport = "";
   let componentPath: string | undefined;
+  let typeSafe = false;
 
   if (mode === "inline") {
     const cp = await p.text({
@@ -696,12 +701,14 @@ export async function runInitWizard(): Promise<void> {
     if (p.isCancel(cp)) cancel();
     componentPath = cp;
   } else {
-    const lib = await p.text({
-      message: "i18n library:",
-      initialValue: "next-intl",
+    i18nImport = "next-intl";
+
+    const ts = await p.confirm({
+      message: "Generate TypeScript types for message keys? (next-intl.d.ts)",
+      initialValue: true,
     });
-    if (p.isCancel(lib)) cancel();
-    i18nImport = lib;
+    if (p.isCancel(ts)) cancel();
+    typeSafe = ts;
   }
 
   const context = await p.text({
@@ -722,8 +729,8 @@ export async function runInitWizard(): Promise<void> {
 
   await ensurePackageInstalled(cwd, provider.pkg, "AI provider");
 
-  if (i18nImport) {
-    await ensurePackageInstalled(cwd, i18nImport, "i18n library");
+  if (mode !== "inline") {
+    await ensurePackageInstalled(cwd, "next-intl", "next-intl");
   }
 
   const configContent = generateConfigFile({
@@ -739,6 +746,7 @@ export async function runInitWizard(): Promise<void> {
     mode,
     componentPath,
     splitByNamespace,
+    typeSafe,
   });
 
   await writeFile(configPath, configContent, "utf-8");
@@ -759,7 +767,7 @@ export async function runInitWizard(): Promise<void> {
       messagesDir,
       splitByNamespace,
     );
-  } else if (i18nImport === "next-intl") {
+  } else {
     await setupNextIntl(cwd, sourceLocale, targetLocales, messagesDir, splitByNamespace);
   }
 

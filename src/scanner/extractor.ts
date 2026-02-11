@@ -29,6 +29,36 @@ import type { Expression, ConditionalExpression } from "@babel/types";
 type TraverseFn = (ast: File, opts: Record<string, any>) => void;
 const traverse = resolveDefault(_traverse) as unknown as TraverseFn;
 
+function getNearestFunctionPath(path: NodePath<any>): NodePath<any> | null {
+  let current = path.parentPath;
+  while (current) {
+    if (
+      current.isFunctionDeclaration() ||
+      current.isFunctionExpression() ||
+      current.isArrowFunctionExpression()
+    ) {
+      return current;
+    }
+    current = current.parentPath;
+  }
+  return null;
+}
+
+function functionContainsJSX(path: NodePath<any>): boolean {
+  let hasJSX = false;
+  path.traverse({
+    JSXElement(p: NodePath<JSXElement>) {
+      hasJSX = true;
+      p.stop();
+    },
+    JSXFragment(p: NodePath<any>) {
+      hasJSX = true;
+      p.stop();
+    },
+  });
+  return hasJSX;
+}
+
 function extractTextFromNode(node: Expression): string | null {
   if (node.type === "StringLiteral") {
     const trimmed = node.value.trim();
@@ -198,6 +228,11 @@ export function extractStrings(
 
     ObjectProperty(path: NodePath<ObjectProperty>) {
       if (!isInsideFunction(path)) return; // skip module-level, codegen can't transform these
+      const ownerFn = getNearestFunctionPath(path as unknown as NodePath<any>);
+      if (!ownerFn) return;
+      if (!functionContainsJSX(ownerFn)) return;
+      const componentName = getComponentName(ownerFn as unknown as NodePath<any>);
+      if (!componentName) return;
 
       const keyNode = path.node.key;
       if (keyNode.type !== "Identifier" && keyNode.type !== "StringLiteral")
@@ -218,7 +253,7 @@ export function extractStrings(
             file: filePath,
             line: valueNode.loc?.start.line ?? 0,
             column: valueNode.loc?.start.column ?? 0,
-            componentName: getComponentName(path),
+            componentName,
             propName,
           });
         }
@@ -244,7 +279,7 @@ export function extractStrings(
         file: filePath,
         line: valueNode.loc?.start.line ?? 0,
         column: valueNode.loc?.start.column ?? 0,
-        componentName: getComponentName(path),
+        componentName,
         propName,
       });
     },

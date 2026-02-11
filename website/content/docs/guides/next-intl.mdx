@@ -7,15 +7,16 @@ translate-kit is designed to work seamlessly with [next-intl](https://next-intl.
 
 ## Setup
 
-The `init` command can scaffold next-intl integration automatically:
+The `init` command scaffolds next-intl integration automatically:
 
 ```bash
 npx translate-kit init
 ```
 
-When you select next-intl as your i18n library, the wizard creates:
+In keys mode, the wizard:
 
-- `i18n/request.ts` with locale detection
+- Installs next-intl automatically
+- Creates `i18n/request.ts` with locale detection
 - Updates `next.config.ts` with `createNextIntlPlugin`
 
 ## Message Format
@@ -34,6 +35,19 @@ translate-kit generates nested JSON files that next-intl expects:
   }
 }
 ```
+
+## Type Safety
+
+Enable `typeSafe: true` in your config to auto-generate a `next-intl.d.ts` file on every scan. This gives you autocomplete and compile-time validation for all message keys.
+
+```ts
+export default defineConfig({
+  // ...
+  typeSafe: true,
+});
+```
+
+You can also generate types manually at any time with `translate-kit typegen`.
 
 ## Using with the Scanner
 
@@ -77,7 +91,13 @@ function Hero() {
 A typical next-intl + translate-kit workflow:
 
 1. Write components with hardcoded English strings
-2. Run `translate-kit scan` to extract strings and generate keys
-3. Run `translate-kit codegen` to replace strings with `t()` calls
-4. Run `translate-kit translate` to generate translations
-5. On subsequent changes, run `translate-kit translate` to update only what changed
+2. Run `translate-kit run` to scan, transform, and translate in one step
+3. On subsequent changes, run `translate-kit run` to update only what changed
+
+You can also run each step individually:
+
+1. `translate-kit scan` — extract strings and generate keys
+2. `translate-kit codegen` — replace strings with `t()` calls
+3. `translate-kit translate` — generate translations
+
+If you only edit source message JSON files manually (without changing source code), `translate-kit translate` is all you need.

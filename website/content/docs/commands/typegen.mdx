@@ -1,0 +1,56 @@
+---
+title: typegen
+description: Generate TypeScript types for message keys.
+---
+
+The `typegen` command generates a `next-intl.d.ts` file with TypeScript type declarations for your message keys. This enables autocomplete and compile-time validation when using `useTranslations`.
+
+## Usage
+
+```bash
+translate-kit typegen
+```
+
+## What It Generates
+
+A `next-intl.d.ts` file at your project root that declares the message structure for next-intl's type system.
+
+### Flat messages (default)
+
+```ts
+// next-intl.d.ts
+import en from "./messages/en.json";
+
+type Messages = typeof en;
+
+declare global {
+  interface IntlMessages extends Messages {}
+}
+```
+
+### Split by namespace
+
+When `splitByNamespace: true`, each namespace file is imported separately:
+
+```ts
+// next-intl.d.ts
+import common from "./messages/en/common.json";
+import auth from "./messages/en/auth.json";
+import nav from "./messages/en/nav.json";
+
+type Messages = typeof common & typeof auth & typeof nav;
+
+declare global {
+  interface IntlMessages extends Messages {}
+}
+```
+
+## When to Use
+
+- When `typeSafe` is disabled in your config but you want to generate types manually
+- After manually editing your source message files
+- Keys mode only — inline mode does not support type generation
+
+## Automatic Generation
+
+If `typeSafe: true` in your config, types are generated automatically on every [`scan`](/docs/commands/scan) and [`run`](/docs/commands/run). The `typegen` command lets you generate them manually without running a full scan.

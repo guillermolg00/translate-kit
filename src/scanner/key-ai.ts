@@ -99,6 +99,48 @@ interface KeyBatchResult {
   usage: { inputTokens: number; outputTokens: number };
 }
 
+function inferNamespace(str: ExtractedString): string {
+  // 1. Component name: "FeaturesGrid" → "featuresGrid", "Newsletter" → "newsletter"
+  if (str.componentName && str.componentName.length > 0) {
+    return str.componentName[0].toLowerCase() + str.componentName.slice(1);
+  }
+
+  // 2. Route path: "/dashboard/settings" → "settings"
+  // Skip dynamic segments like [id], [...slug]
+  if (str.routePath) {
+    const segments = str.routePath
+      .split("/")
+      .filter((s) => s.length > 0 && !s.startsWith("["));
+    if (segments.length > 0) {
+      return segments[segments.length - 1].toLowerCase();
+    }
+  }
+
+  // 3. File path: "src/components/sections/hero.tsx" → "hero"
+  // For generic names (index, page, layout), use parent directory
+  if (str.file) {
+    const parts = str.file.replace(/\.\w+$/, "").split("/");
+    const fileName = parts[parts.length - 1];
+    if (
+      fileName &&
+      fileName !== "index" &&
+      fileName !== "page" &&
+      fileName !== "layout"
+    ) {
+      return fileName[0].toLowerCase() + fileName.slice(1);
+    }
+    // Use parent directory for generic filenames
+    if (parts.length >= 2) {
+      const dir = parts[parts.length - 2];
+      if (dir && !dir.startsWith("[") && !dir.startsWith("(")) {
+        return dir[0].toLowerCase() + dir.slice(1);
+      }
+    }
+  }
+
+  return "common";
+}
+
 async function generateKeysBatchWithRetry(
   model: LanguageModel,
   strings: ExtractedString[],
@@ -134,12 +176,17 @@ async function generateKeysBatchWithRetry(
       const result: Record<string, string> = {};
       for (const mapping of object.mappings) {
         if (mapping.index >= 0 && mapping.index < texts.length) {
-          if (!mapping.key.includes(".")) {
+          let key = mapping.key;
+          if (!key.includes(".")) {
+            // Infer namespace from component name or file path
+            const str = strings[mapping.index];
+            const ns = inferNamespace(str);
+            key = `${ns}.${key}`;
             logWarning(
-              `AI generated single-segment key "${mapping.key}" for "${texts[mapping.index]}". Namespace optimization will be skipped for this key.`,
+              `AI generated single-segment key "${mapping.key}" for "${texts[mapping.index]}". Auto-prefixed to "${key}".`,
             );
           }
-          result[texts[mapping.index]] = mapping.key;
+          result[texts[mapping.index]] = key;
         }
       }
       return { keys: result, usage: totalUsage };

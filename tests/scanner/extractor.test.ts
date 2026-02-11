@@ -209,6 +209,18 @@ describe("extractor", () => {
       expect(objProps).toHaveLength(0);
     });
 
+    it("does not extract object properties inside non-component callbacks", () => {
+      const code = `const MyMark = SomeLib.create(() => {
+        return { title: "Project Management" };
+      });
+      function App() { return <div />; }`;
+      const ast = parseFile(code, "test.tsx");
+      const strings = extractStrings(ast, "test.tsx");
+
+      const objProps = strings.filter((s) => s.type === "object-property");
+      expect(objProps).toHaveLength(0);
+    });
+
     it("records propName for object properties", () => {
       const code = `function App() {
         const item = { title: "Hello World" };

@@ -1,0 +1,42 @@
+---
+title: Dependencies
+description: Runtime and build dependencies and their purpose.
+---
+
+translate-kit is not a runtime dependency of your project. It generates standard code and JSON files. If you remove it, your app keeps working exactly the same.
+
+## Runtime Dependencies
+
+These are the packages translate-kit uses internally when you run its commands:
+
+| Dependency | Purpose |
+|------------|---------|
+| `ai` (Vercel AI SDK) | `generateObject` with Zod schemas for all AI calls (key generation and translation) |
+| `@babel/parser` | Parse JSX/TSX source code into AST |
+| `@babel/traverse` | Walk and analyze the AST to find translatable strings |
+| `@babel/generator` | Generate modified source code from the transformed AST |
+| `@babel/types` | AST node builders and type guards |
+| `c12` | Config file loading — supports `.ts`, `.js`, `.json` formats |
+| `zod` | Config validation and AI response schemas |
+| `citty` | CLI command framework with subcommands and flags |
+| `@clack/prompts` | Interactive terminal prompts for the `init` wizard |
+| `picocolors` | Terminal color output |
+| `dotenv` | Environment variable loading (for API keys) |
+| `tinyglobby` | File pattern matching for the scanner's include/exclude globs |
+| `p-limit` | Concurrency limiter for parallel AI batch processing |
+| `tokenlens` | Token counting for AI batch size estimation |
+
+## Peer Dependencies
+
+| Dependency | Purpose |
+|------------|---------|
+| `ai` (>=4.0.0) | Required — provides the AI model interface |
+
+## What Gets Installed in Your Project
+
+translate-kit generates code that depends on:
+
+- **Keys mode**: `next-intl` — installed automatically by the `init` wizard
+- **Inline mode**: no external runtime dependency — the generated `<T>` component is self-contained
+
+The AI provider SDK (e.g. `@ai-sdk/openai`) is the only additional dependency you install alongside translate-kit itself.

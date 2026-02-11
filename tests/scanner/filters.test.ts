@@ -20,14 +20,17 @@ describe("shouldIgnore", () => {
     expect(shouldIgnore("http://localhost:3000")).toBe(true);
   });
 
-  it("ignores kebab-case identifiers", () => {
-    expect(shouldIgnore("my-component")).toBe(true);
+  it("ignores likely kebab-case identifiers", () => {
+    expect(shouldIgnore("my-component")).toBe(false);
     expect(shouldIgnore("some-long-identifier")).toBe(true);
+    expect(shouldIgnore("feature-flag-rollout")).toBe(true);
   });
 
   it("ignores CONSTANT_CASE", () => {
     expect(shouldIgnore("MAX_RETRIES")).toBe(true);
-    expect(shouldIgnore("API")).toBe(true);
+    expect(shouldIgnore("USER2_ID")).toBe(true);
+    expect(shouldIgnore("API")).toBe(false);
+    expect(shouldIgnore("OK")).toBe(false);
   });
 
   it("ignores numbers and currency", () => {

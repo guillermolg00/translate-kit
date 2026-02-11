@@ -492,6 +492,134 @@ describe("generateSemanticKeys", () => {
     );
   });
 
+  it("auto-prefixes single-segment keys with inferred namespace from component", async () => {
+    const strings: ExtractedString[] = [
+      {
+        text: "Subscribe to updates",
+        type: "jsx-text",
+        file: "src/components/Newsletter.tsx",
+        line: 5,
+        column: 0,
+        componentName: "Newsletter",
+        parentTag: "p",
+      },
+    ];
+
+    vi.mocked(generateObject).mockResolvedValueOnce(
+      makeMockResponse([{ index: 0, key: "subscribeToUpdates" }]),
+    );
+
+    const result = await generateSemanticKeys({
+      model: mockModel,
+      strings,
+    });
+
+    // Should be prefixed with "newsletter." from componentName
+    expect(result["Subscribe to updates"]).toBe(
+      "newsletter.subscribeToUpdates",
+    );
+  });
+
+  it("auto-prefixes single-segment keys using file path when no component", async () => {
+    const strings: ExtractedString[] = [
+      {
+        text: "Hello",
+        type: "jsx-text",
+        file: "src/app/dashboard/page.tsx",
+        line: 1,
+        column: 0,
+        parentTag: "h1",
+      },
+    ];
+
+    vi.mocked(generateObject).mockResolvedValueOnce(
+      makeMockResponse([{ index: 0, key: "hello" }]),
+    );
+
+    const result = await generateSemanticKeys({
+      model: mockModel,
+      strings,
+    });
+
+    // page.tsx is generic, so parent dir "dashboard" is used
+    expect(result["Hello"]).toBe("dashboard.hello");
+  });
+
+  it("auto-prefixes with 'common' when no context is available", async () => {
+    const strings: ExtractedString[] = [
+      {
+        text: "OK",
+        type: "jsx-text",
+        file: "",
+        line: 1,
+        column: 0,
+        parentTag: "button",
+      },
+    ];
+
+    vi.mocked(generateObject).mockResolvedValueOnce(
+      makeMockResponse([{ index: 0, key: "ok" }]),
+    );
+
+    const result = await generateSemanticKeys({
+      model: mockModel,
+      strings,
+    });
+
+    expect(result["OK"]).toBe("common.ok");
+  });
+
+  it("preserves camelCase when inferring namespace from component name", async () => {
+    const strings: ExtractedString[] = [
+      {
+        text: "View all",
+        type: "jsx-text",
+        file: "src/components/FeaturesGrid.tsx",
+        line: 1,
+        column: 0,
+        componentName: "FeaturesGrid",
+        parentTag: "a",
+      },
+    ];
+
+    vi.mocked(generateObject).mockResolvedValueOnce(
+      makeMockResponse([{ index: 0, key: "viewAll" }]),
+    );
+
+    const result = await generateSemanticKeys({
+      model: mockModel,
+      strings,
+    });
+
+    expect(result["View all"]).toBe("featuresGrid.viewAll");
+  });
+
+  it("skips dynamic route segments when inferring namespace", async () => {
+    const strings: ExtractedString[] = [
+      {
+        text: "Details",
+        type: "jsx-text",
+        file: "src/app/projects/[id]/page.tsx",
+        line: 1,
+        column: 0,
+        parentTag: "h1",
+        routePath: "/projects/[id]",
+      },
+    ];
+
+    vi.mocked(generateObject).mockResolvedValueOnce(
+      makeMockResponse([{ index: 0, key: "details" }]),
+    );
+
+    const result = await generateSemanticKeys({
+      model: mockModel,
+      strings,
+    });
+
+    // [id] is skipped, "projects" is used from route path
+    expect(result["Details"]).toBe("projects.details");
+  });
+
   it("sorts strings by file and component before batching", async () => {
     const unorderedStrings: ExtractedString[] = [
       {

@@ -272,6 +272,37 @@ export default function Counter() {
     expect(result.code).not.toContain("getTranslations");
   });
 
+  it("detects aliased hooks imported from react as client", () => {
+    const code = `import { useState as s } from "react";
+export default function Counter() {
+  const [count, setCount] = s(0);
+  return <p>Welcome to our platform</p>;
+}`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, textToKey);
+
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain(
+      'import { useTranslations } from "next-intl"',
+    );
+    expect(result.code).toContain('const t = useTranslations("hero")');
+    expect(result.code).not.toContain("getTranslations");
+  });
+
+  it("does not treat arbitrary string statements as client directives", () => {
+    const code = `"not a client directive";
+export default function Hero() { return <h1>Welcome to our platform</h1>; }`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, textToKey);
+
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain(
+      'import { getTranslations } from "next-intl/server"',
+    );
+    expect(result.code).toContain('const t = await getTranslations("hero")');
+    expect(result.code).not.toContain("useTranslations(");
+  });
+
   it("forceClient: true forces useTranslations even for server components", () => {
     const code = `export default function Hero() { return <h1>Welcome to our platform</h1>; }`;
     const ast = parseFile(code, "test.tsx");
@@ -284,6 +315,7 @@ export default function Counter() {
     // Single key hero.welcome → namespace "hero"
     expect(result.code).toContain('const t = useTranslations("hero")');
     expect(result.code).not.toContain("getTranslations");
+    expect(result.code).toContain('"use client"');
   });
 
   it("makes arrow function server components async with await getTranslations", () => {
@@ -311,6 +343,16 @@ export default function Counter() {
     expect(result.code).toContain('const t = await getTranslations("hero")');
   });
 
+  it("injects getTranslations for anonymous default arrow exports", () => {
+    const code = `export default () => <h1>Welcome to our platform</h1>;`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, textToKey);
+
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain('await getTranslations("hero")');
+    expect(result.code).toContain('t("welcome")');
+  });
+
   it("custom i18nImport does not apply server/client split", () => {
     const code = `export default function Hero() { return <h1>Welcome to our platform</h1>; }`;
     const ast = parseFile(code, "test.tsx");
@@ -324,6 +366,41 @@ export default function Counter() {
     // Single key hero.welcome → namespace "hero"
     expect(result.code).toContain('const t = useTranslations("hero")');
     expect(result.code).not.toContain("getTranslations");
+  });
+
+  it("reuses aliased useTranslations import instead of injecting a new one", () => {
+    const code = `"use client";
+import { useTranslations as useI18n } from "next-intl";
+export default function Hero() {
+  const t = useI18n();
+  return <h1>Welcome to our platform</h1>;
+}`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, textToKey);
+
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain("useI18n");
+    expect(result.code).toContain('const t = useI18n("hero")');
+    expect((result.code.match(/const t\s*=/g) || []).length).toBe(1);
+    expect(result.code).not.toContain(
+      'import { useTranslations } from "next-intl"',
+    );
+  });
+
+  it("reuses aliased getTranslations import on server components", () => {
+    const code = `import { getTranslations as getT } from "next-intl/server";
+export default async function Hero() {
+  const t = await getT();
+  return <h1>Welcome to our platform</h1>;
+}`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, textToKey);
+
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain("await getT(\"hero\")");
+    expect(result.code).toContain('t("welcome")');
+    expect((result.code.match(/const t\s*=/g) || []).length).toBe(1);
+    expect(result.code).not.toContain("getTranslations(");
   });
 
   it("does not wrap module-level object properties like metadata", () => {
@@ -1055,6 +1132,22 @@ export function Logo() {
     expect(result.code).toContain('from "@/components/t"');
     expect(result.code).not.toContain("t-server");
     expect(result.code).toContain("useT");
+    expect(result.code).toContain('"use client"');
+  });
+
+  it("adds 'use client' when forceClient injects useT into fresh file", () => {
+    const code = `export function Logo() { return <img alt="Mimir Logo" />; }`;
+    const ast = parseFile(code, "logo.tsx");
+    const result = transform(
+      ast,
+      { "Mimir Logo": "common.mimirLogo" },
+      { ...inlineOpts, forceClient: true },
+    );
+
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain('"use client"');
+    expect(result.code).toContain("useT");
+    expect(result.code).toContain('from "@/components/t"');
   });
 
   it("repairs useT() → createT() in server component body", () => {
@@ -1132,6 +1225,137 @@ describe("AST validation post-codegen", () => {
         expect(() => parseFile(result.code, fixture.file)).not.toThrow();
       }
     }
+  });
+});
+
+describe("codegen transform (duplicate const t edge cases)", () => {
+  it("does not create duplicate const t when user code has const t = {} (keys mode, client)", () => {
+    const code = `"use client";
+export default function Widget() {
+  const t = {};
+  return <h1>Hello World</h1>;
+}`;
+    const ast = parseFile(code, "widget.tsx");
+    const result = transform(ast, { "Hello World": "widget.hello" });
+
+    expect(result.modified).toBe(true);
+    // Should NOT have duplicate const t declarations
+    const tMatches = result.code.match(/const t\s*=/g);
+    expect(tMatches?.length).toBe(1);
+  });
+
+  it("does not create duplicate const t when user code has const t = {} (keys mode, server)", () => {
+    const code = `export default function Widget() {
+  const t = {};
+  return <h1>Hello World</h1>;
+}`;
+    const ast = parseFile(code, "widget.tsx");
+    const result = transform(ast, { "Hello World": "widget.hello" });
+
+    expect(result.modified).toBe(true);
+    const tMatches = result.code.match(/const t\s*=/g);
+    expect(tMatches?.length).toBe(1);
+  });
+
+  it("does not create duplicate const t when user code has const t = otherFunc() (inline mode)", () => {
+    const code = `"use client";
+export function Widget() {
+  const t = useCustomTranslation();
+  return <h1>Hello World</h1>;
+}`;
+    const ast = parseFile(code, "widget.tsx");
+    const inlineOpts: TransformOptions = {
+      mode: "inline",
+      componentPath: "@/components/t",
+    };
+    const result = transform(ast, { "Hello World": "widget.hello" }, inlineOpts);
+
+    expect(result.modified).toBe(true);
+    const tMatches = result.code.match(/const t\s*=/g);
+    expect(tMatches?.length).toBe(1);
+  });
+});
+
+describe("codegen transform (updateCallNamespace preserves dynamic args)", () => {
+  it("does not overwrite dynamic namespace variable in useTranslations", () => {
+    const code = `"use client";
+import { useTranslations } from "next-intl";
+export default function Widget() {
+  const t = useTranslations(dynamicNs);
+  return <h1>{t("hello")}</h1>;
+}`;
+    const ast = parseFile(code, "widget.tsx");
+    const result = transform(ast, { Hello: "widget.hello" });
+
+    // dynamicNs should be preserved, not overwritten with "widget"
+    expect(result.code).toContain("dynamicNs");
+    expect(result.code).not.toContain('"widget"');
+  });
+});
+
+describe("codegen transform (arrow expression body edge cases)", () => {
+  it("converts arrow expression body to block and injects useTranslations (client, keys mode)", () => {
+    const code = `"use client";\nconst Page = () => <h1>Welcome to our platform</h1>;`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, { "Welcome to our platform": "hero.welcome" });
+
+    expect(result.modified).toBe(true);
+    expect(result.stringsWrapped).toBe(1);
+    expect(result.code).toContain('useTranslations("hero")');
+    expect(result.code).toContain('t("welcome")');
+    // Should have been converted to block body with return
+    expect(result.code).toContain("return");
+  });
+
+  it("converts arrow expression body to block and injects getTranslations (server, keys mode)", () => {
+    const code = `const Page = () => <h1>Welcome to our platform</h1>;`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, { "Welcome to our platform": "hero.welcome" });
+
+    expect(result.modified).toBe(true);
+    expect(result.stringsWrapped).toBe(1);
+    expect(result.code).toContain('getTranslations("hero")');
+    expect(result.code).toContain('t("welcome")');
+    expect(result.code).toContain("async");
+    expect(result.code).toContain("return");
+  });
+
+  it("converts arrow expression body to block and injects hook (inline mode)", () => {
+    const inlineOpts: TransformOptions = {
+      mode: "inline",
+      componentPath: "@/components/t",
+    };
+    const code = `const Page = () => <input placeholder="Search..." />;`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, { "Search...": "common.searchPlaceholder" }, inlineOpts);
+
+    expect(result.modified).toBe(true);
+    expect(result.stringsWrapped).toBe(1);
+    expect(result.code).toContain("createT()");
+    expect(result.code).toContain("return");
+  });
+});
+
+describe("codegen transform (dynamic namespace does not strip keys)", () => {
+  it("preserves fully qualified keys when useTranslations has dynamic arg", () => {
+    const code = `"use client";
+import { useTranslations } from "next-intl";
+export default function Widget() {
+  const t = useTranslations(dynamicNs);
+  return <div><h1>Welcome to our platform</h1><p>Get started with your journey today</p></div>;
+}`;
+    const ast = parseFile(code, "widget.tsx");
+    const result = transform(ast, {
+      "Welcome to our platform": "hero.welcome",
+      "Get started with your journey today": "hero.getStarted",
+    });
+
+    expect(result.modified).toBe(true);
+    // Dynamic arg → keys should NOT be stripped
+    expect(result.code).toContain('t("hero.welcome")');
+    expect(result.code).toContain('t("hero.getStarted")');
+    // Dynamic arg preserved
+    expect(result.code).toContain("dynamicNs");
   });
 });
 

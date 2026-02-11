@@ -13,6 +13,7 @@ const configSchema = z
     targetLocales: z.array(z.string().min(1)).min(1),
     messagesDir: z.string().min(1),
     splitByNamespace: z.boolean().default(false).optional(),
+    typeSafe: z.boolean().default(false).optional(),
     translation: z
       .object({
         batchSize: z.number().int().positive().default(50),

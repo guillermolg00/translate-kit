@@ -33,6 +33,7 @@ import {
   formatUsage,
   formatCost,
 } from "./usage.js";
+import { generateNextIntlTypes } from "./typegen.js";
 import type { TranslationResult } from "./types.js";
 import { parseTranslateFlags, validateLocale } from "./cli-utils.js";
 
@@ -367,6 +368,115 @@ const codegenCommand = defineCommand({
   },
 });
 
+const typegenCommand = defineCommand({
+  meta: {
+    name: "typegen",
+    description: "Generate TypeScript types for message keys (next-intl.d.ts)",
+  },
+  async run() {
+    const config = await loadTranslateKitConfig();
+    if (config.mode === "inline") {
+      logWarning("Type generation is only available in keys mode.");
+      return;
+    }
+    await generateNextIntlTypes(config.messagesDir, config.sourceLocale, config.splitByNamespace);
+    logSuccess(`Generated ${join(config.messagesDir, "next-intl.d.ts")}`);
+  },
+});
+
+const runCommand = defineCommand({
+  meta: {
+    name: "run",
+    description: "Run the full pipeline: scan → codegen → translate",
+  },
+  args: {
+    "dry-run": {
+      type: "boolean",
+      default: false,
+      description: "Preview without writing",
+    },
+    force: {
+      type: "boolean",
+      default: false,
+      description: "Ignore translation cache",
+    },
+    verbose: {
+      type: "boolean",
+      default: false,
+      description: "Verbose output",
+    },
+  },
+  async run({ args }) {
+    const config = await loadTranslateKitConfig();
+
+    if (!config.scan) {
+      logError("No scan configuration found. Add a 'scan' section to your config.");
+      process.exit(1);
+    }
+
+    const usageTracker = createUsageTracker();
+
+    // --- SCAN ---
+    logInfo("Scanning...");
+    const scanResult = await runScanStep({
+      config,
+      cwd: process.cwd(),
+      callbacks: {
+        onScanProgress: (c, t) => logProgress(c, t, "Scanning..."),
+        onKeygenProgress: (c, t) => logProgress(c, t, "Generating keys..."),
+        onUsage: (usage) => usageTracker.add(usage),
+      },
+    });
+    logProgressClear();
+    logSuccess(`Scan: ${scanResult.bareStringCount} strings from ${scanResult.fileCount} files`);
+
+    if (scanResult.bareStringCount === 0 && Object.keys(scanResult.textToKey).length === 0) {
+      logWarning("No translatable strings found.");
+      return;
+    }
+
+    // --- CODEGEN ---
+    const codegenResult = await runCodegenStep({
+      config,
+      cwd: process.cwd(),
+      textToKey: scanResult.textToKey,
+      callbacks: {
+        onProgress: (c, t) => logProgress(c, t, "Codegen..."),
+      },
+    });
+    logProgressClear();
+    logSuccess(`Codegen: ${codegenResult.stringsWrapped} strings wrapped in ${codegenResult.filesModified} files`);
+
+    // --- TRANSLATE ---
+    const locales = config.targetLocales;
+    logStart(config.sourceLocale, locales);
+
+    const translateResult = await runTranslateStep({
+      config,
+      sourceFlat: scanResult.sourceFlat,
+      locales,
+      force: args.force,
+      callbacks: {
+        onLocaleProgress: (locale, c, t) => logProgress(c, t, `Translating ${locale}...`),
+        onUsage: (usage) => usageTracker.add(usage),
+      },
+    });
+
+    for (const r of translateResult.localeResults) {
+      logLocaleStart(r.locale);
+      logProgressClear();
+      logLocaleResult(r);
+    }
+    logSummary(translateResult.localeResults);
+
+    const usage = usageTracker.get();
+    if (usage.totalTokens > 0) {
+      const cost = await estimateCost(config.model, usage);
+      logUsage(formatUsage(usage), cost ? formatCost(cost.totalUSD) : undefined);
+    }
+  },
+});
+
 const initCommand = defineCommand({
   meta: {
     name: "init",
@@ -388,11 +498,42 @@ const main = defineCommand({
     translate: translateCommand,
     scan: scanCommand,
     codegen: codegenCommand,
+    run: runCommand,
+    typegen: typegenCommand,
     init: initCommand,
   },
-  // Default to translate command
   async run({ rawArgs }) {
-    if (rawArgs.length === 0 || rawArgs[0]?.startsWith("-")) {
+    if (rawArgs.length === 0) {
+      console.log(`
+  translate-kit — AI-powered translation SDK for build time
+
+  Usage:
+    translate-kit <command> [flags]
+
+  Commands:
+    init        Interactive setup wizard
+    run         Full pipeline: scan → codegen → translate
+    scan        Scan source code for translatable strings
+    codegen     Replace strings with t() calls
+    translate   Translate messages to target locales
+    typegen     Generate TypeScript types for message keys
+
+  Flags:
+    --dry-run   Preview without writing files
+    --force     Ignore translation cache
+    --locale    Only translate a specific locale
+    --verbose   Verbose output
+
+  Examples:
+    translate-kit init              # Set up a new project
+    translate-kit run               # Full pipeline
+    translate-kit translate         # Translate only (incremental)
+    translate-kit translate --force # Re-translate everything
+`);
+      return;
+    }
+
+    if (rawArgs[0]?.startsWith("-")) {
       const { dryRun, force, verbose, locale } = parseTranslateFlags(rawArgs);
 
       await translateCommand.run!({

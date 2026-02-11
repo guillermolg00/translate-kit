@@ -1,0 +1,52 @@
+---
+title: run
+description: Run the full pipeline in one command.
+---
+
+The `run` command executes the full pipeline: scan, codegen, and translate — in one step.
+
+## Usage
+
+```bash
+translate-kit run
+```
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Preview without writing files |
+| `--force` | Ignore translation cache, re-translate everything |
+| `--verbose` | Show detailed output |
+
+## What It Does
+
+1. **Scans** source files for translatable strings and generates semantic keys (same as [`scan`](/docs/commands/scan))
+2. **Replaces** strings with i18n calls and injects imports (same as [`codegen`](/docs/commands/codegen))
+3. **Translates** to all target locales, only sending new/modified keys (same as [`translate`](/docs/commands/translate))
+
+## When to Use
+
+- After initial setup with [`init`](/docs/commands/init)
+- When you've added or modified translatable strings in your source code
+- As a single command in CI/CD pipelines
+
+## Difference with Individual Commands
+
+`run` passes data directly between steps without intermediate file reads, making it slightly more efficient than running each command separately. It's the recommended way to execute the full pipeline.
+
+## Examples
+
+```bash
+# Full pipeline
+translate-kit run
+
+# Preview what would change
+translate-kit run --dry-run
+
+# Force re-translate everything
+translate-kit run --force
+
+# See detailed output
+translate-kit run --verbose
+```

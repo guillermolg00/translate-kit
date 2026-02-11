@@ -32,32 +32,100 @@ export function isInsideFunction(path: NodePath<Node>): boolean {
  * Walk up the AST to find the enclosing React component name.
  */
 export function getComponentName(path: NodePath<Node>): string | undefined {
+  const isNestedInFunctionOrClass = (nodePath: NodePath<Node>): boolean => {
+    let current = nodePath.parentPath;
+    while (current) {
+      if (
+        current.isFunctionDeclaration() ||
+        current.isFunctionExpression() ||
+        current.isArrowFunctionExpression() ||
+        current.isClassMethod() ||
+        current.isClassPrivateMethod() ||
+        current.isClassDeclaration() ||
+        current.isClassExpression()
+      ) {
+        return true;
+      }
+      if (current.isProgram()) return false;
+      current = current.parentPath;
+    }
+    return false;
+  };
+
+  const getNameFromFunctionLike = (
+    fnPath: NodePath<Node>,
+  ): string | undefined => {
+    if (fnPath.isFunctionDeclaration()) {
+      if (fnPath.node.id) return fnPath.node.id.name;
+      if (fnPath.parentPath?.isExportDefaultDeclaration()) return "__default__";
+      return undefined;
+    }
+
+    if (!fnPath.isFunctionExpression() && !fnPath.isArrowFunctionExpression()) {
+      return undefined;
+    }
+
+    if (isNestedInFunctionOrClass(fnPath)) return undefined;
+
+    const parent = fnPath.parentPath;
+    if (!parent) return undefined;
+
+    if (parent.isVariableDeclarator() && parent.node.id.type === "Identifier") {
+      return parent.node.id.name;
+    }
+
+    if (parent.isExportDefaultDeclaration()) return "__default__";
+
+    if (parent.isCallExpression()) {
+      let call: NodePath<Node> = parent;
+      while (call.parentPath?.isCallExpression()) {
+        call = call.parentPath;
+      }
+      const carrier = call.parentPath;
+      if (!carrier) return undefined;
+      if (
+        carrier.isVariableDeclarator() &&
+        carrier.node.id.type === "Identifier"
+      ) {
+        return carrier.node.id.name;
+      }
+      if (carrier.isExportDefaultDeclaration()) return "__default__";
+    }
+
+    return undefined;
+  };
+
+  const getNameFromClassLike = (
+    classPath: NodePath<Node>,
+  ): string | undefined => {
+    if (classPath.isClassDeclaration()) {
+      if (classPath.node.id) return classPath.node.id.name;
+      if (classPath.parentPath?.isExportDefaultDeclaration())
+        return "__default__";
+      return undefined;
+    }
+
+    if (!classPath.isClassExpression()) return undefined;
+    if (isNestedInFunctionOrClass(classPath)) return undefined;
+
+    const parent = classPath.parentPath;
+    if (!parent) return undefined;
+    if (parent.isVariableDeclarator() && parent.node.id.type === "Identifier") {
+      return parent.node.id.name;
+    }
+    if (parent.isExportDefaultDeclaration()) return "__default__";
+
+    return undefined;
+  };
+
   let current: NodePath<Node> | null = path;
   while (current) {
-    if (current.isFunctionDeclaration() && current.node.id) {
-      return current.node.id.name;
-    }
-    if (
-      current.isVariableDeclarator() &&
-      current.node.id?.type === "Identifier"
-    ) {
-      // Only treat as component name if the init is a function (arrow/expression).
-      // Skip plain variables like `const items = [...]`.
-      const init = current.node.init;
-      if (
-        init &&
-        (init.type === "ArrowFunctionExpression" ||
-          init.type === "FunctionExpression")
-      ) {
-        return current.node.id.name;
-      }
-    }
-    if (current.isExportDefaultDeclaration()) {
-      const decl = current.node.declaration;
-      if (decl.type === "FunctionDeclaration" && decl.id) {
-        return decl.id.name;
-      }
-    }
+    const functionName = getNameFromFunctionLike(current);
+    if (functionName) return functionName;
+
+    const className = getNameFromClassLike(current);
+    if (className) return className;
+
     current = current.parentPath;
   }
   return undefined;

@@ -1,0 +1,34 @@
+---
+title: Current Limitations
+description: Known limitations and what's on the roadmap.
+---
+
+translate-kit is still in beta. It handles around 95% of a typical codebase's translatable content — that's already a lot of tedious work off your plate, but the remaining 5% still needs manual supervision.
+
+## Patterns Not Yet Supported
+
+The scanner extracts strings from JSX text, attributes, expression containers, object properties, template literals, and conditional expressions. However, some patterns are beyond its current reach:
+
+- **Strings in variables and constants** — `const title = "Welcome"` won't be detected unless it's used directly in JSX
+- **Non-JSX files** — strings in plain `.ts` files (API responses, error messages, etc.) aren't scanned
+
+For these cases, add the keys manually to your source locale JSON and translate-kit will translate them along with everything else.
+
+## Framework Support
+
+- **Currently supported**: next-intl + Next.js
+- Other i18n libraries and frameworks are not yet supported, though the core pipeline (scan, codegen, translate) is framework-agnostic by design
+
+## AI Limitations
+
+- **Plurals and gender** — basic handling only. Complex ICU MessageFormat patterns need manual authoring
+- **Context boundaries** — the AI receives project context and namespace information, but very nuanced domain-specific terms may need glossary entries
+- **Large batches** — very large codebases benefit from adjusting `batchSize` and `concurrency` settings
+
+## Roadmap
+
+- Close the remaining gap — support strings in variables and non-JSX files
+- Support other i18n runtimes and frameworks beyond next-intl
+- Translation memory across projects
+- Better handling of plurals and gender-specific translations
+- Per-route lazy loading of namespaces

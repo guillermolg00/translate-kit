@@ -1,15 +1,21 @@
 import { dirname, extname, join, resolve } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
+import _traverse from "@babel/traverse";
 import type { File } from "@babel/types";
 import { glob } from "tinyglobby";
 import pLimit from "p-limit";
 import { parseFile } from "../scanner/parser.js";
+import { resolveDefault } from "../utils/ast-helpers.js";
 import {
   detectClientFile,
   transform,
   type TransformOptions,
 } from "./transform.js";
 import { logWarning } from "../logger.js";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type TraverseFn = (ast: File, opts: Record<string, any>) => void;
+const traverse = resolveDefault(_traverse) as unknown as TraverseFn;
 
 export interface CodegenOptions {
   include: string[];
@@ -48,8 +54,73 @@ const SOURCE_EXTENSIONS = [
   ".cjs",
 ];
 
+interface PathAliasResolver {
+  prefix: string;
+  exact: boolean;
+  targets: string[];
+}
+
+function stripJsonComments(input: string): string {
+  return input
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+}
+
+async function loadPathAliasResolvers(cwd: string): Promise<PathAliasResolver[]> {
+  const configNames = ["tsconfig.json", "jsconfig.json"];
+
+  for (const configName of configNames) {
+    let raw: string;
+    try {
+      raw = await readFile(join(cwd, configName), "utf-8");
+    } catch {
+      continue;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stripJsonComments(raw));
+    } catch {
+      continue;
+    }
+
+    const compilerOptions = (
+      parsed as { compilerOptions?: { baseUrl?: string; paths?: unknown } }
+    ).compilerOptions;
+    if (!compilerOptions?.paths || typeof compilerOptions.paths !== "object") {
+      return [];
+    }
+
+    const baseUrl =
+      typeof compilerOptions.baseUrl === "string"
+        ? compilerOptions.baseUrl
+        : ".";
+    const baseDir = resolve(join(cwd, baseUrl));
+    const resolvers: PathAliasResolver[] = [];
+
+    for (const [pattern, replacements] of Object.entries(compilerOptions.paths)) {
+      if (!Array.isArray(replacements) || replacements.length === 0) continue;
+
+      const wildcard = pattern.endsWith("/*");
+      const prefix = wildcard ? pattern.slice(0, -1) : pattern;
+      const targets = replacements
+        .filter((r): r is string => typeof r === "string")
+        .map((r) => (wildcard && r.endsWith("/*") ? r.slice(0, -1) : r))
+        .map((r) => resolve(join(baseDir, r)));
+
+      if (targets.length === 0) continue;
+      resolvers.push({ prefix, exact: !wildcard, targets });
+    }
+
+    resolvers.sort((a, b) => b.prefix.length - a.prefix.length);
+    return resolvers;
+  }
+
+  return [];
+}
+
 function collectRuntimeImportSources(ast: File): string[] {
-  const sources: string[] = [];
+  const sources = new Set<string>();
 
   for (const node of ast.program.body) {
     if (node.type === "ImportDeclaration") {
@@ -63,25 +134,43 @@ function collectRuntimeImportSources(ast: File): string[] {
         );
       if (allTypeSpecifiers) continue;
 
-      sources.push(node.source.value);
+      sources.add(node.source.value);
       continue;
     }
 
     if (node.type === "ExportNamedDeclaration" && node.source) {
       if (node.exportKind !== "type") {
-        sources.push(node.source.value);
+        sources.add(node.source.value);
       }
       continue;
     }
 
     if (node.type === "ExportAllDeclaration") {
       if (node.exportKind !== "type") {
-        sources.push(node.source.value);
+        sources.add(node.source.value);
       }
     }
   }
 
-  return sources;
+  traverse(ast, {
+    ImportExpression(path: any) {
+      if (path.node.source.type === "StringLiteral") {
+        sources.add(path.node.source.value);
+      }
+    },
+    CallExpression(path: any) {
+      // Babel can represent import() as CallExpression with Import callee.
+      if (
+        path.node.callee.type === "Import" &&
+        path.node.arguments[0]?.type === "StringLiteral"
+      ) {
+        sources.add(path.node.arguments[0].value);
+      }
+    },
+    noScope: true,
+  });
+
+  return [...sources];
 }
 
 function resolveFileCandidate(
@@ -121,6 +210,7 @@ function resolveLocalImport(
   source: string,
   cwd: string,
   knownFiles: Set<string>,
+  pathAliases: PathAliasResolver[],
 ): string | null {
   const baseCandidates: string[] = [];
 
@@ -134,7 +224,18 @@ function resolveLocalImport(
   } else if (source.startsWith("/")) {
     baseCandidates.push(resolve(join(cwd, source.slice(1))));
   } else {
-    return null;
+    for (const alias of pathAliases) {
+      if (alias.exact) {
+        if (source !== alias.prefix) continue;
+        baseCandidates.push(...alias.targets);
+      } else if (source.startsWith(alias.prefix)) {
+        const suffix = source.slice(alias.prefix.length);
+        for (const target of alias.targets) {
+          baseCandidates.push(resolve(join(target, suffix)));
+        }
+      }
+    }
+    if (baseCandidates.length === 0) return null;
   }
 
   for (const base of baseCandidates) {
@@ -148,6 +249,7 @@ function resolveLocalImport(
 function buildClientGraph(
   entries: ParsedFileEntry[],
   cwd: string,
+  pathAliases: PathAliasResolver[],
 ): Set<string> {
   const parsedEntries = entries.filter((e) => e.ast != null);
   const knownFiles = new Set(parsedEntries.map((e) => e.filePath));
@@ -157,7 +259,13 @@ function buildClientGraph(
     const deps: string[] = [];
     const imports = collectRuntimeImportSources(entry.ast!);
     for (const source of imports) {
-      const dep = resolveLocalImport(entry.filePath, source, cwd, knownFiles);
+      const dep = resolveLocalImport(
+        entry.filePath,
+        source,
+        cwd,
+        knownFiles,
+        pathAliases,
+      );
       if (dep) deps.push(dep);
     }
     depsByImporter.set(entry.filePath, deps);
@@ -226,7 +334,8 @@ export async function codegen(
     ),
   );
 
-  const forceClientSet = buildClientGraph(parsedEntries, cwd);
+  const pathAliases = await loadPathAliasResolvers(cwd);
+  const forceClientSet = buildClientGraph(parsedEntries, cwd, pathAliases);
 
   const limit = pLimit(10);
   let completed = 0;

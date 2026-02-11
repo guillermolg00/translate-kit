@@ -3,17 +3,19 @@ title: Introduction
 description: AI-powered translation SDK for build time.
 ---
 
-translate-kit is an AI-powered translation SDK that generates translations at build time using your own AI models via the [Vercel AI SDK](https://sdk.vercel.ai/). It's compatible with [next-intl](https://next-intl.dev/) and supports any AI provider with no vendor lock-in.
+## What is translate-kit?
 
-## Features
+In 2026, manually writing i18n JSON files key by key is obsolete. AI handles translation now, but ad-hoc prompts create inconsistent results across files. translate-kit is a single tool that handles the entire translation pipeline at build time, powered by AI, with zero runtime cost.
 
-- **Build-time AI translation** — translate JSON message files using any AI model
-- **Incremental** — only new or modified keys get translated via a lock file system
-- **Any provider** — OpenAI, Anthropic, Google, Mistral, Groq, or any Vercel AI SDK provider
-- **Scanner** — extract translatable strings from JSX/TSX source code
-- **Codegen** — replace hardcoded strings with `t()` calls or `<T>` components
-- **Two modes** — keys mode (`t("key")`) or [inline mode](/docs/guides/inline-mode) (`<T id="key">text</T>`)
-- **next-intl ready** — generates `useTranslations`-compatible message files
+It extracts translatable strings from your JSX/TSX, generates semantic keys with AI, replaces hardcoded text with i18n calls, and translates everything to your target locales — using your own AI models via [Vercel AI SDK](https://sdk.vercel.ai/). Compatible with [next-intl](https://next-intl.dev/).
+
+## What Makes It Different
+
+- **Build-time, not runtime** — translation happens before you ship. No client-side SDK, no loading spinners, no runtime overhead. The output is static JSON files that next-intl serves directly.
+- **Zero dependency footprint** — translate-kit is not a runtime dependency. It generates standard next-intl code and JSON files. If you remove translate-kit tomorrow, your app keeps working exactly the same.
+- **AI-native, provider-agnostic** — works with any AI model from any provider (OpenAI, Anthropic, Google, Mistral, Groq). The AI receives full context: project description, glossary, tone, namespace structure.
+- **Incremental by default** — a lock file tracks SHA-256 hashes. Only changed keys get sent to the AI on re-runs, keeping costs predictable and API calls fast.
+- **Scanner understands code** — parses your AST, distinguishes user-facing text from code artifacts, and filters automatically. No manual string extraction.
 
 ## How It Works
 
@@ -27,7 +29,12 @@ scan → codegen → translate
 2. **Codegen** — replace hardcoded strings with `t("key")` calls or `<T id="key">text</T>` components
 3. **Translate** — diff source messages against a lock file, translate only new/modified keys
 
-You can use any step independently or run the full pipeline. The `translate` command is the most commonly used on its own — write your source messages manually and let translate-kit handle the rest.
+You can use any step independently or run the full pipeline with [`translate-kit run`](/docs/commands/run). The `translate` command is the most commonly used on its own — write your source messages manually and let translate-kit handle the rest.
+
+## Two Modes
+
+- **Keys mode** (default) — strings replaced with `t("key")` calls, source text moves to JSON files. Works with next-intl's `useTranslations`.
+- **Inline mode** — strings wrapped with `<T id="key">text</T>`, source text stays visible in your code. See the [Inline Mode guide](/docs/guides/inline-mode).
 
 ## Incremental by Default
 

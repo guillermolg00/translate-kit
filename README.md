@@ -4,40 +4,28 @@ AI-powered i18n for your codebase. Scan, transform, and translate — at build t
 
 [![npm version](https://img.shields.io/npm/v/translate-kit.svg)](https://www.npmjs.com/package/translate-kit)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![CI](https://github.com/guillermolg00/translate-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/guillermolg00/translate-kit/actions/workflows/ci.yml)
 
-translate-kit extracts translatable strings from your JSX/TSX, generates semantic keys with AI, replaces hardcoded text with i18n calls, and translates everything to your target locales — using your own AI models via [Vercel AI SDK](https://sdk.vercel.ai/). Compatible with [next-intl](https://next-intl.dev/).
+In 2026, manually writing i18n JSON files key by key is obsolete. translate-kit is a CLI that handles the entire translation pipeline at build time: it extracts translatable strings from your JSX/TSX, generates semantic keys with AI, replaces hardcoded text with i18n calls, and translates everything to your target locales — using your own AI models via [Vercel AI SDK](https://sdk.vercel.ai/). Compatible with [next-intl](https://next-intl.dev/).
 
-**[Documentation](https://translate-kit.com/docs)** · **[Getting Started](https://translate-kit.com/docs/getting-started)** · **[Configuration](https://translate-kit.com/docs/configuration)**
+**Zero runtime cost. Zero lock-in.** translate-kit is not a runtime dependency. It generates standard next-intl code and JSON files. If you remove it tomorrow, your app keeps working exactly the same.
+
+**[Documentation](https://translate-kit.com/docs)** · **[Blog](https://translate-kit.com/blog)** · **[Getting Started](https://translate-kit.com/docs/getting-started)**
 
 ---
-
-## Features
-
-- **Build-time AI translation** — no runtime overhead, translations are generated at build time
-- **Incremental** — lock file tracks source hashes, re-runs only translate what changed
-- **Any AI provider** — OpenAI, Anthropic, Google, Mistral, Groq, or any Vercel AI SDK provider
-- **Scanner** — extract translatable strings from JSX/TSX using Babel AST analysis
-- **Codegen** — replace hardcoded strings with `t()` calls or `<T>` components automatically
-- **Two modes** — keys mode (`t("key")`) or inline mode (`<T id="key">text</T>`)
-- **next-intl ready** — generates `useTranslations`-compatible message files
 
 ## Quick Start
 
 ```bash
-# Install translate-kit and an AI provider
-bun add translate-kit @ai-sdk/openai
+# Install
+npm install translate-kit @ai-sdk/openai
 
-# Interactive setup
-bunx translate-kit init
-
-# Translate
-bunx translate-kit translate
+# Interactive setup — scaffolds config, installs next-intl, runs the full pipeline
+npx translate-kit init
 ```
 
-The `init` wizard creates your config, sets up locales, and optionally runs the full pipeline.
+That's it. The `init` wizard creates your config, sets up locales, and optionally scans + transforms + translates your entire codebase in one step.
 
-> See the full [Getting Started](https://translate-kit.com/docs/getting-started) guide for detailed setup instructions.
+> See the full [Getting Started](https://translate-kit.com/docs/getting-started) guide for detailed setup.
 
 ## How It Works
 
@@ -47,11 +35,61 @@ scan → codegen → translate
 
 | Step | What it does |
 |------|-------------|
-| **scan** | Parses JSX/TSX files, extracts translatable strings, generates semantic keys via AI |
-| **codegen** | Replaces hardcoded strings with `t("key")` calls or `<T>` components, injects imports |
-| **translate** | Diffs source messages against lock file, translates only new/modified keys |
+| **scan** | Parses JSX/TSX with Babel, extracts translatable strings (text, attributes, template literals, ternaries), generates semantic keys via AI |
+| **codegen** | Replaces hardcoded strings with `t("key")` calls or `<T>` wrappers, injects imports and hooks, detects server/client components |
+| **translate** | Diffs source messages against a lock file (SHA-256 hashes), only sends new/modified keys to the AI, writes target locale files |
 
-You can use any step independently. The `translate` command is the most commonly used on its own — write your source messages and let translate-kit handle the rest.
+Run the full pipeline with one command:
+
+```bash
+npx translate-kit run
+```
+
+Or use each step independently. `translate` is the most common standalone command — write your source messages manually and let translate-kit handle the rest.
+
+## Features
+
+### Build-time, not runtime
+
+Translation happens before your app ships. No client-side SDK, no loading spinners, no flash of untranslated content. The output is static JSON files that next-intl reads at render time.
+
+### Any AI provider
+
+Works with any [Vercel AI SDK](https://sdk.vercel.ai/) provider. You pick the model, you control the cost.
+
+```bash
+npm install @ai-sdk/openai       # OpenAI
+npm install @ai-sdk/anthropic    # Anthropic
+npm install @ai-sdk/google       # Google
+npm install @ai-sdk/mistral      # Mistral
+npm install @ai-sdk/groq         # Groq
+```
+
+```ts
+import { openai } from "@ai-sdk/openai";       // model: openai("gpt-4o-mini")
+import { anthropic } from "@ai-sdk/anthropic";  // model: anthropic("claude-sonnet-4-20250514")
+import { google } from "@ai-sdk/google";        // model: google("gemini-2.0-flash")
+```
+
+### Incremental by default
+
+A `.translate-lock.json` file tracks SHA-256 hashes of every source value. Re-runs only translate what changed. Costs stay predictable.
+
+### Smart extraction
+
+The scanner parses your AST and understands which strings are user-facing text vs. code artifacts (CSS classes, URLs, constants). It extracts JSX text, attributes, template literals, conditional expressions, and object properties automatically.
+
+### Namespace scoping
+
+Codegen detects when all keys in a component share the same prefix and generates `useTranslations("hero")` instead of `useTranslations()`. Keys are stripped to their local form: `t("welcome")` instead of `t("hero.welcome")`. This lets next-intl tree-shake messages per component.
+
+### Selective client payload
+
+The generated layout only sends namespaces used by client components to `NextIntlClientProvider`. If your app has 20 namespaces but only 4 are used in client components, the client bundle shrinks proportionally.
+
+### Type safety
+
+Enable `typeSafe: true` and translate-kit auto-generates a `next-intl.d.ts` file on every scan — full autocomplete and compile-time validation for all message keys.
 
 ## Configuration
 
@@ -65,23 +103,30 @@ export default defineConfig({
   sourceLocale: "en",
   targetLocales: ["es", "fr", "de", "ja"],
   messagesDir: "./messages",
+  splitByNamespace: true,
+  typeSafe: true,
+  translation: {
+    context: "SaaS application for project management",
+    glossary: { "Acme": "Acme" },
+    tone: "professional",
+  },
 });
 ```
 
-> See the full [Configuration reference](https://translate-kit.com/docs/configuration) for all options including translation context, glossary, tone, batching, and scanner settings.
+> See the [Configuration reference](https://translate-kit.com/docs/configuration) for all options.
 
 ## Two Modes
 
 ### Keys mode (default)
 
-Hardcoded strings are replaced with `t("key")` calls. Source text lives in JSON files.
+Strings are replaced with `t("key")` calls. Source text moves to JSON files.
 
 ```tsx
 // Before
 <h1>Welcome back</h1>
 
 // After
-<h1>{t("hero.welcomeBack")}</h1>
+<h1>{t("welcomeBack")}</h1>
 ```
 
 ### Inline mode
@@ -96,92 +141,57 @@ Source text stays visible in your code. A `<T>` component handles runtime resolu
 <h1><T id="hero.welcomeBack">Welcome back</T></h1>
 ```
 
-> See the [Inline Mode](https://translate-kit.com/docs/guides/inline-mode) guide for setup and usage.
-
-## AI Providers
-
-Any [Vercel AI SDK](https://sdk.vercel.ai/) provider works. Install the provider package and set your API key:
-
-```bash
-bun add @ai-sdk/openai       # OpenAI
-bun add @ai-sdk/anthropic    # Anthropic
-bun add @ai-sdk/google       # Google
-bun add @ai-sdk/mistral      # Mistral
-bun add @ai-sdk/groq         # Groq
-```
-
-```ts
-import { openai } from "@ai-sdk/openai";       // model: openai("gpt-4o-mini")
-import { anthropic } from "@ai-sdk/anthropic";  // model: anthropic("claude-sonnet-4-20250514")
-import { google } from "@ai-sdk/google";        // model: google("gemini-2.0-flash")
-```
-
-> See the [AI Providers](https://translate-kit.com/docs/guides/providers) guide for all providers and recommended models.
+> See the [Inline Mode](https://translate-kit.com/docs/guides/inline-mode) guide for setup.
 
 ## Commands
 
-### `translate-kit init`
+| Command | Description |
+|---------|-------------|
+| `translate-kit init` | Interactive setup wizard |
+| `translate-kit run` | Full pipeline: scan + codegen + translate |
+| `translate-kit scan` | Extract strings and generate keys |
+| `translate-kit codegen` | Replace strings with i18n calls |
+| `translate-kit translate` | Translate to target locales (incremental) |
+| `translate-kit typegen` | Generate TypeScript types for keys |
 
-Interactive setup wizard. Creates config, scaffolds i18n integration, and optionally runs the full pipeline.
+All commands support `--dry-run` to preview changes and `--verbose` for detailed output. `translate` and `run` support `--force` to ignore the cache.
 
-```bash
-bunx translate-kit init
+> See the [Commands](https://translate-kit.com/docs/commands/init) documentation for flags and examples.
+
+## Per-Namespace Splitting
+
+With `splitByNamespace: true`, messages are written as individual files instead of one monolithic JSON:
+
+```
+messages/en/hero.json     → { "welcome": "Welcome", "getStarted": "Get started" }
+messages/en/common.json   → { "save": "Save", "cancel": "Cancel" }
+messages/en/auth.json     → { "signIn": "Sign in", "signOut": "Sign out" }
 ```
 
-### `translate-kit scan`
+This enables granular code-splitting and keeps diffs clean.
 
-Extracts translatable strings from your source code and generates semantic keys with AI.
+## Current Limitations
 
-```bash
-bunx translate-kit scan           # Scan and generate keys
-bunx translate-kit scan --dry-run # Preview found strings
-```
+translate-kit handles around 95% of translatable content in a typical codebase. Patterns not yet supported:
 
-### `translate-kit codegen`
+- Strings in standalone variables and constants (`const title = "Welcome"`)
+- Non-JSX files (API responses, error messages in plain `.ts` files)
+- Currently next-intl / Next.js only — other i18n runtimes are on the roadmap
 
-Replaces hardcoded strings with i18n calls and injects imports/hooks.
+For these cases, add keys manually to your source locale JSON and translate-kit will translate them along with everything else.
 
-```bash
-bunx translate-kit codegen           # Transform source files
-bunx translate-kit codegen --dry-run # Preview changes
-```
-
-### `translate-kit translate`
-
-Translates messages to all target locales. Only new or modified keys are sent to the AI.
-
-```bash
-bunx translate-kit translate              # Translate all locales
-bunx translate-kit translate --locale es  # Only Spanish
-bunx translate-kit translate --dry-run    # Preview what would be translated
-bunx translate-kit translate --force      # Ignore cache, re-translate everything
-```
-
-> See the [Commands](https://translate-kit.com/docs/commands/init) documentation for detailed usage and flags.
-
-## Incremental Translations
-
-A `.translate-lock.json` file stores SHA-256 hashes of source values. On each run, translate-kit computes a diff:
-
-- **Added** — new keys, not yet translated
-- **Modified** — source text changed since last translation
-- **Unchanged** — hash matches, skipped
-- **Removed** — keys no longer in source, cleaned up
-
-Only added and modified keys are sent to the AI. This keeps API calls fast and costs low.
-
-> See the [Incremental Translations](https://translate-kit.com/docs/guides/incremental) guide for details.
+> See the [full limitations page](https://translate-kit.com/docs/technical/limitations) for details.
 
 ## Documentation
 
-Full documentation is available at **[translate-kit.com](https://translate-kit.com/docs)**.
+Full documentation at **[translate-kit.com](https://translate-kit.com/docs)**.
 
 - [Getting Started](https://translate-kit.com/docs/getting-started)
 - [Configuration](https://translate-kit.com/docs/configuration)
 - [AI Providers](https://translate-kit.com/docs/guides/providers)
 - [Inline Mode](https://translate-kit.com/docs/guides/inline-mode)
-- [Incremental Translations](https://translate-kit.com/docs/guides/incremental)
 - [next-intl Integration](https://translate-kit.com/docs/guides/next-intl)
+- [Architecture](https://translate-kit.com/docs/technical/architecture)
 
 ## License
 

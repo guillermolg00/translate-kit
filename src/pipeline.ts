@@ -127,8 +127,15 @@ export async function runScanStep(
     }
   }
 
-  // allTexts includes wrapped strings for key deduplication
+  // allTexts includes wrapped strings for key deduplication.
+  // In keys mode, wrapped calls usually expose keys (not source text), so we
+  // keep existing text entries to avoid pruning valid mappings on re-scans.
   const allTexts = new Set(result.strings.map((s) => s.text));
+  if (mode === "keys") {
+    for (const text of Object.keys(existingMap)) {
+      allTexts.add(text);
+    }
+  }
 
   const textToKey = await generateSemanticKeys({
     model: config.model,
@@ -164,7 +171,9 @@ export async function runScanStep(
       const content = JSON.stringify(nested, null, 2) + "\n";
       await writeFile(sourceFile, content, "utf-8");
     }
-    await generateNextIntlTypes(config.messagesDir, config.sourceLocale, config.splitByNamespace);
+    if (config.typeSafe) {
+      await generateNextIntlTypes(config.messagesDir, config.sourceLocale, config.splitByNamespace);
+    }
   }
 
   return {

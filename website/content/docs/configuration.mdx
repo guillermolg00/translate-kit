@@ -34,6 +34,12 @@ export default defineConfig({
     retries: 2,
   },
 
+  // Split messages into per-namespace files
+  splitByNamespace: true,
+
+  // Generate TypeScript types for message keys (keys mode only)
+  typeSafe: true,
+
   // Scanner options (for scan + codegen commands)
   scan: {
     include: ["src/**/*.tsx", "app/**/*.tsx"],
@@ -66,6 +72,13 @@ export default defineConfig({
 
 - **`keys`** — replaces strings with `t("key")` calls and generates a source locale JSON file
 - **`inline`** — wraps strings with `<T id="key">text</T>` components, source text stays in code
+
+## Output Options
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `splitByNamespace` | `boolean` | `false` | Split messages into per-namespace files (e.g. `messages/en/common.json`) |
+| `typeSafe` | `boolean` | `false` | Generate `next-intl.d.ts` type declarations on scan (keys mode only) |
 
 ## Inline Options
 

@@ -110,6 +110,7 @@ describe("runScanStep", () => {
 
     const config = makeConfig({
       messagesDir,
+      typeSafe: true,
       scan: { include: ["src/**/*.tsx"], exclude: [] },
     });
 
@@ -135,7 +136,7 @@ describe("runScanStep", () => {
     );
     expect(sourceJson.app.helloWorld).toBe("Hello World");
 
-    // next-intl.d.ts should be generated (keys mode)
+    // next-intl.d.ts should be generated (keys mode + typeSafe)
     const dtsContent = await readFile(
       join(messagesDir, "next-intl.d.ts"),
       "utf-8",
@@ -177,6 +178,40 @@ export default function Page() {
     // Only the bare "New text" should be counted, not the t-call
     expect(result.bareStringCount).toBe(1);
     expect(result.textToKey["New text"]).toBe("page.newText");
+  });
+
+  it("preserves existing map entries on keys-mode re-scan of already wrapped files", async () => {
+    const srcDir = join(tempDir, "src");
+    await mkdir(srcDir, { recursive: true });
+    await writeFile(
+      join(srcDir, "Page.tsx"),
+      `import { useTranslations } from "next-intl";
+export default function Page() {
+  const t = useTranslations("common");
+  return <div>{t("hello")}</div>;
+}`,
+      "utf-8",
+    );
+
+    const messagesDir = join(tempDir, "messages");
+    const existingMap = { Hello: "common.hello" };
+    await writeMapFile(messagesDir, existingMap);
+
+    const config = makeConfig({
+      mode: "keys",
+      messagesDir,
+      scan: { include: ["src/**/*.tsx"], exclude: [], i18nImport: "next-intl" },
+    });
+
+    const result = await runScanStep({ config, cwd: tempDir });
+
+    expect(result.bareStringCount).toBe(0);
+    expect(result.textToKey).toEqual(existingMap);
+    expect(result.sourceFlat).toEqual({ "common.hello": "Hello" });
+    expect(generateObject).not.toHaveBeenCalled();
+
+    const mapData = await loadMapFile(messagesDir);
+    expect(mapData).toEqual(existingMap);
   });
 });
 
