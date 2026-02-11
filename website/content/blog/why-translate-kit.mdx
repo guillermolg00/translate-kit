@@ -1,0 +1,81 @@
+---
+title: "Why I'm Building translate-kit"
+description: "The idea behind translate-kit: a build-time translation SDK that uses AI to handle the entire i18n pipeline, from extracting strings to generating translations."
+date: "2025-02-11"
+author: "Guillermo Lopez"
+---
+
+Let's be honest: in 2026, nobody is manually writing i18n JSON files key by key. You either ask your AI agent to do it or your IDE autocomplete fills it in. And that technically works — until you need German, Chinese, or any language you don't actually speak. You can't review what you can't read. Google Translate is unreliable for product copy. So you end up burning tokens on ad-hoc prompts, getting inconsistent results across files, and still having to maintain every key yourself across every locale. It's tedious, error-prone, and it doesn't scale.
+
+I built translate-kit because I wanted a proper system for this: a single tool that handles the entire translation pipeline at build time, powered by AI, with zero runtime cost. Not a chatbot you paste strings into — a CLI that understands your codebase, extracts the strings, generates the keys, and translates everything incrementally.
+
+---
+
+## What translate-kit does
+
+translate-kit is a CLI and library with a three-step pipeline:
+
+```
+scan → codegen → translate
+```
+
+**Scan** parses your JSX/TSX files and extracts every translatable string — text content, placeholders, alt texts, aria labels. It uses AI to generate semantic keys grouped by namespace (`hero.welcome`, `auth.signIn`, `form.enterName`), so you don't have to come up with key names yourself.
+
+**Codegen** takes the scan output and transforms your source code. It replaces hardcoded strings with `t("key")` calls or `<T>` component wrappers, injects the right imports, and validates the output by re-parsing the AST before writing.
+
+**Translate** loads the source messages, computes a diff against a lock file (SHA256 hashes), and only sends new or modified keys to the AI. It merges cached translations with fresh ones, validates placeholder preservation, and writes the target locale files.
+
+You can use each step independently — many people just use `translate` with manually written source messages — or run the full pipeline to go from bare strings to a fully translated app in one command.
+
+---
+
+## What makes it different
+
+### Build-time, not runtime
+
+Translation happens before your app ships. There's no client-side SDK fetching translations on page load, no loading spinners, no flash of untranslated content. The output is static JSON files that next-intl reads at render time, just like hand-written ones.
+
+### Zero dependency footprint
+
+This is something I care a lot about. translate-kit doesn't inject itself into your project. It configures next-intl and uses AI to translate — but at the end of the day, **translate-kit itself is not a runtime dependency**. You can install it globally, run it, and it won't even show up in your project's `package.json`. What it produces is standard next-intl code and standard JSON files. Nothing proprietary, nothing that ties you in.
+
+If you remove translate-kit tomorrow, your app keeps working exactly the same. It just makes efficient what you're already doing in other, messier ways — asking your agent, copy-pasting from ChatGPT, maintaining keys by hand. translate-kit automates that into a repeatable pipeline, and then gets out of the way.
+
+### AI-native, provider-agnostic
+
+translate-kit uses the Vercel AI SDK under the hood, which means you can plug in any model from any provider: OpenAI, Anthropic, Google, Mistral, Groq, or any other. You're not locked into a specific translation API. You pick the model, you control the cost.
+
+The AI doesn't just do word-by-word translation. It receives context: the project description, a glossary of terms that shouldn't be translated, the tone you want, and the namespace structure. This produces translations that are aware of your product's domain.
+
+### Incremental by default
+
+A `.translate-lock.json` file tracks the SHA256 hash of every source string. When you re-run `translate`, only keys that changed since the last run get sent to the AI. This keeps API calls fast and costs predictable. You can re-run the pipeline on every build without worrying about re-translating your entire app.
+
+### The scanner understands your code
+
+Most i18n tools expect you to manually extract strings and assign keys. translate-kit's scanner does this automatically. It parses the AST, understands which strings are user-facing text vs. code artifacts (CSS classes, URLs, constants), and filters accordingly. The AI then groups related strings by component and route to generate namespace-aware keys.
+
+### Two modes for different preferences
+
+**Keys mode** is the traditional approach: strings move out of your code into JSON files, replaced by `t("key")` calls. This works seamlessly with next-intl's `useTranslations`.
+
+**Inline mode** keeps the source text visible in your code. Instead of `t("hero.welcome")`, you see `<T id="hero.welcome">Welcome to our platform</T>`. The source text acts as documentation and fallback. Target translations live in JSON files, but your code remains readable.
+
+
+---
+
+## Where it's headed
+
+translate-kit is still in beta, and it doesn't cover everything. Strings inside variables, constants, dynamic content, conditional expressions — there are patterns the scanner can't reach yet. Realistically, it handles around 95% of a typical codebase's translatable content. That's already a lot of tedious work off your plate, but that remaining 5% still needs your supervision. I'm working on closing that gap in the short term.
+
+Beyond that, the core pipeline — scan, codegen, translate — is framework-agnostic by design, even though right now it's tightly integrated with next-intl and Next.js. Supporting other i18n runtimes and frameworks is on the roadmap.
+
+There's also a lot of room to improve the AI side: better context awareness, translation memory across projects, and smarter handling of plurals and gender-specific translations.
+
+If you want to try it out:
+
+```bash
+npx translate-kit init
+```
+
+It takes about a minute to set up. Feedback and contributions are welcome on [GitHub](https://github.com/guillermolg00/translate-kit).
