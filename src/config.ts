@@ -16,7 +16,7 @@ const configSchema = z
       .object({
         batchSize: z.number().int().positive().default(50),
         context: z.string().optional(),
-        glossary: z.record(z.string()).optional(),
+        glossary: z.record(z.string(), z.string()).optional(),
         tone: z.string().optional(),
         retries: z.number().int().min(0).default(2),
         concurrency: z.number().int().positive().default(3),

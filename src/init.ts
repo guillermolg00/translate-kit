@@ -535,7 +535,7 @@ export async function runInitWizard(): Promise<void> {
   const sourceLocale = await p.text({
     message: "Source locale:",
     initialValue: "en",
-    validate(value) {
+    validate(value = "") {
       if (!validateLocale(value)) {
         return "Invalid locale. Use only letters, numbers, hyphens, and underscores.";
       }
