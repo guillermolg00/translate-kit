@@ -436,7 +436,7 @@ async function setupInlineI18n(
     if (!layoutContent.includes("I18nProvider")) {
       const importLines =
         `import { I18nProvider } from "${componentPath}";\n` +
-        `import { setServerMessages } from "${componentPath}-server";\n` +
+        `import { setServerMessages, setLocale } from "${componentPath}-server";\n` +
         `import { getLocale, getMessages } from "@/i18n";\n`;
 
       layoutContent = insertImportsAfterLast(layoutContent, importLines);
@@ -444,12 +444,12 @@ async function setupInlineI18n(
 
       layoutContent = layoutContent.replace(
         /return\s*\(/,
-        "const locale = await getLocale();\n\tconst messages = await getMessages(locale);\n\tsetServerMessages(messages);\n\n\treturn (",
+        "const locale = await getLocale();\n\tsetLocale(locale);\n\tconst messages = await getMessages(locale);\n\tsetServerMessages(messages);\n\n\treturn (",
       );
 
       layoutContent = layoutContent.replace(
         /(<body[^>]*>)/,
-        "$1\n\t\t\t\t<I18nProvider messages={messages}>",
+        "$1\n\t\t\t\t<I18nProvider messages={messages} locale={locale}>",
       );
       layoutContent = layoutContent.replace(
         /<\/body>/,

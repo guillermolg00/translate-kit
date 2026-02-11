@@ -1,10 +1,15 @@
 export const CLIENT_TEMPLATE = `"use client";
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useContext, useEffect, type ReactNode } from "react";
 
 type Messages = Record<string, string>;
 const I18nCtx = createContext<Messages>({});
 
-export function I18nProvider({ messages = {}, children }: { messages?: Messages; children: ReactNode }) {
+export function I18nProvider({ messages = {}, locale, children }: { messages?: Messages; locale?: string; children: ReactNode }) {
+  useEffect(() => {
+    if (locale) {
+      document.cookie = \`NEXT_LOCALE=\${locale}; path=/; max-age=31536000; SameSite=Lax\`;
+    }
+  }, [locale]);
   return <I18nCtx.Provider value={messages}>{children}</I18nCtx.Provider>;
 }
 
@@ -93,17 +98,38 @@ function parseAcceptLanguage(header: string): Locale {
   return defaultLocale;
 }
 
+const getLocaleStore = cache(() => ({ current: null as string | null }));
+
+export function setLocale(locale: string) {
+  getLocaleStore().current = locale;
+}
+
 // Per-request cached message loading — works even when layout is cached during client-side navigation
 // Uses dynamic imports so this file can be safely imported from client components
 const getCachedMessages = cache(async (): Promise<Messages> => {
-  const { headers } = await import("next/headers");
+  let locale: Locale | null = getLocaleStore().current as Locale | null;
+
+  if (!locale) {
+    try {
+      const { cookies } = await import("next/headers");
+      const c = await cookies();
+      const cookieLocale = c.get("NEXT_LOCALE")?.value;
+      if (cookieLocale && supported.includes(cookieLocale as Locale)) {
+        locale = cookieLocale as Locale;
+      }
+    } catch {}
+  }
+
+  if (!locale) {
+    const { headers } = await import("next/headers");
+    const h = await headers();
+    const acceptLang = h.get("accept-language") ?? "";
+    locale = parseAcceptLanguage(acceptLang);
+  }
+
+  if (locale === defaultLocale) return {};
   const { readFile } = await import("node:fs/promises");
   const { join } = await import("node:path");
-
-  const h = await headers();
-  const acceptLang = h.get("accept-language") ?? "";
-  const locale = parseAcceptLanguage(acceptLang);
-  if (locale === defaultLocale) return {};
   try {
     const filePath = join(process.cwd(), messagesDir, \`\${locale}.json\`);
     const content = await readFile(filePath, "utf-8");
@@ -174,7 +200,7 @@ export function generateI18nHelper(opts: {
 }): string {
   const allLocales = [opts.sourceLocale, ...opts.targetLocales];
   const allLocalesStr = allLocales.map((l) => `"${l}"`).join(", ");
-  return `import { headers } from "next/headers";
+  return `import { headers, cookies } from "next/headers";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -198,6 +224,13 @@ function parseAcceptLanguage(header: string): Locale {
 }
 
 export async function getLocale(): Promise<Locale> {
+  try {
+    const c = await cookies();
+    const cookieLocale = c.get("NEXT_LOCALE")?.value;
+    if (cookieLocale && supported.includes(cookieLocale as Locale)) {
+      return cookieLocale as Locale;
+    }
+  } catch {}
   const h = await headers();
   const acceptLang = h.get("accept-language") ?? "";
   return parseAcceptLanguage(acceptLang);
