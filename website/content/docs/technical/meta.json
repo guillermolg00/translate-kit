@@ -1,4 +1,4 @@
 {
-  "title": "Technical",
-  "pages": ["architecture", "dependencies", "limitations"]
+	"title": "Technical",
+	"pages": ["architecture", "dependencies", "limitations"]
 }

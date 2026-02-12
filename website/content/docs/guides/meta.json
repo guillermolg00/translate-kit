@@ -1,4 +1,4 @@
 {
-  "title": "Guides",
-  "pages": ["inline-mode", "providers", "next-intl", "incremental"]
+	"title": "Guides",
+	"pages": ["inline-mode", "providers", "next-intl", "incremental"]
 }

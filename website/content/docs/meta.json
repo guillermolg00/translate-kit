@@ -1,14 +1,14 @@
 {
-  "title": "Docs",
-  "pages": [
-    "index",
-    "getting-started",
-    "configuration",
-    "---Commands---",
-    "...commands",
-    "---Guides---",
-    "...guides",
-    "---Technical---",
-    "...technical"
-  ]
+	"title": "Docs",
+	"pages": [
+		"index",
+		"getting-started",
+		"configuration",
+		"---Commands---",
+		"...commands",
+		"---Guides---",
+		"...guides",
+		"---Technical---",
+		"...technical"
+	]
 }

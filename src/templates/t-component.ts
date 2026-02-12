@@ -53,33 +53,33 @@ const SPLIT_LOAD_BODY = `  try {
   }`;
 
 function buildSingleFileLoadBody(
-  targetLocales: string[],
-  relativeMessagesDir: string,
+	targetLocales: string[],
+	relativeMessagesDir: string,
 ): string {
-  // Generate static import() calls per locale — works on all platforms
-  const cases = targetLocales
-    .map(
-      (locale) =>
-        `      case "${locale}": return (await import("${relativeMessagesDir}/${locale}.json")).default;`,
-    )
-    .join("\n");
+	// Generate static import() calls per locale — works on all platforms
+	const cases = targetLocales
+		.map(
+			(locale) =>
+				`      case "${locale}": return (await import("${relativeMessagesDir}/${locale}.json")).default;`,
+		)
+		.join("\n");
 
-  return `  try {\n    switch (locale) {\n${cases}\n      default: return {};\n    }\n  } catch {\n    return {};\n  }`;
+	return `  try {\n    switch (locale) {\n${cases}\n      default: return {};\n    }\n  } catch {\n    return {};\n  }`;
 }
 
 export function serverTemplate(
-  clientBasename: string,
-  opts?: {
-    sourceLocale: string;
-    targetLocales: string[];
-    messagesDir: string;
-    splitByNamespace?: boolean;
-    relativeMessagesDir?: string;
-  },
+	clientBasename: string,
+	opts?: {
+		sourceLocale: string;
+		targetLocales: string[];
+		messagesDir: string;
+		splitByNamespace?: boolean;
+		relativeMessagesDir?: string;
+	},
 ): string {
-  if (!opts) {
-    // Legacy fallback (no lazy loading)
-    return `import type { ReactNode } from "react";
+	if (!opts) {
+		// Legacy fallback (no lazy loading)
+		return `import type { ReactNode } from "react";
 import { cache } from "react";
 export { I18nProvider } from "./${clientBasename}";
 
@@ -107,27 +107,30 @@ export function createT(messages?: Messages) {
   };
 }
 `;
-  }
+	}
 
-  const allLocales = [opts.sourceLocale, ...opts.targetLocales];
-  const allLocalesStr = allLocales.map((l) => `"${l}"`).join(", ");
+	const allLocales = [opts.sourceLocale, ...opts.targetLocales];
+	const allLocalesStr = allLocales.map((l) => `"${l}"`).join(", ");
 
-  const isSplit = !!opts.splitByNamespace;
-  // Compute the relative import path for messages directory
-  let messagesImportPath = opts.relativeMessagesDir ?? opts.messagesDir;
-  // Ensure it starts with ./ or ../ for relative imports
-  if (!messagesImportPath.startsWith(".") && !messagesImportPath.startsWith("/")) {
-    messagesImportPath = `./${messagesImportPath}`;
-  }
-  const loadBody = isSplit
-    ? SPLIT_LOAD_BODY
-    : buildSingleFileLoadBody(opts.targetLocales, messagesImportPath);
-  // messagesDir const is only needed for split mode (filesystem loading)
-  const messagesDirConst = isSplit
-    ? `\nconst messagesDir = "${opts.messagesDir}";\n`
-    : "\n";
+	const isSplit = !!opts.splitByNamespace;
+	// Compute the relative import path for messages directory
+	let messagesImportPath = opts.relativeMessagesDir ?? opts.messagesDir;
+	// Ensure it starts with ./ or ../ for relative imports
+	if (
+		!messagesImportPath.startsWith(".") &&
+		!messagesImportPath.startsWith("/")
+	) {
+		messagesImportPath = `./${messagesImportPath}`;
+	}
+	const loadBody = isSplit
+		? SPLIT_LOAD_BODY
+		: buildSingleFileLoadBody(opts.targetLocales, messagesImportPath);
+	// messagesDir const is only needed for split mode (filesystem loading)
+	const messagesDirConst = isSplit
+		? `\nconst messagesDir = "${opts.messagesDir}";\n`
+		: "\n";
 
-  return `import type { ReactNode } from "react";
+	return `import type { ReactNode } from "react";
 import { cache } from "react";
 export { I18nProvider } from "./${clientBasename}";
 
@@ -238,20 +241,20 @@ export function createT(messages?: Messages): TFn & PromiseLike<TFn> {
 }
 
 export function generateI18nHelper(opts: {
-  sourceLocale: string;
-  targetLocales: string[];
-  messagesDir: string;
-  splitByNamespace?: boolean;
+	sourceLocale: string;
+	targetLocales: string[];
+	messagesDir: string;
+	splitByNamespace?: boolean;
 }): string {
-  const allLocales = [opts.sourceLocale, ...opts.targetLocales];
-  const allLocalesStr = allLocales.map((l) => `"${l}"`).join(", ");
+	const allLocales = [opts.sourceLocale, ...opts.targetLocales];
+	const allLocalesStr = allLocales.map((l) => `"${l}"`).join(", ");
 
-  const fsImports = opts.splitByNamespace
-    ? `import { readFile, readdir } from "node:fs/promises";`
-    : `import { readFile } from "node:fs/promises";`;
+	const fsImports = opts.splitByNamespace
+		? `import { readFile, readdir } from "node:fs/promises";`
+		: `import { readFile } from "node:fs/promises";`;
 
-  const getMessagesBody = opts.splitByNamespace
-    ? `  if (locale === defaultLocale) return {};
+	const getMessagesBody = opts.splitByNamespace
+		? `  if (locale === defaultLocale) return {};
   try {
     const dir = join(process.cwd(), "${opts.messagesDir}", locale);
     let files: string[];
@@ -272,7 +275,7 @@ export function generateI18nHelper(opts: {
   } catch {
     return {};
   }`
-    : `  if (locale === defaultLocale) return {};
+		: `  if (locale === defaultLocale) return {};
   try {
     const filePath = join(process.cwd(), "${opts.messagesDir}", \`\${locale}.json\`);
     const content = await readFile(filePath, "utf-8");
@@ -281,7 +284,7 @@ export function generateI18nHelper(opts: {
     return {};
   }`;
 
-  return `import { headers, cookies } from "next/headers";
+	return `import { headers, cookies } from "next/headers";
 ${fsImports}
 import { join } from "node:path";
 

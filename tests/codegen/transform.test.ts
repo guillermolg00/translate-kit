@@ -1,249 +1,243 @@
-import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseFile } from "../../src/scanner/parser.js";
+import { describe, expect, it } from "vitest";
 import {
-  transform,
-  detectNamespace,
-  type TransformOptions,
+	detectNamespace,
+	type TransformOptions,
+	transform,
 } from "../../src/codegen/transform.js";
+import { parseFile } from "../../src/scanner/parser.js";
 
 const fixturesDir = join(import.meta.dirname, "fixtures");
 
 const textToKey: Record<string, string> = {
-  "Welcome to our platform": "hero.welcome",
-  "Get started with your journey today": "hero.getStarted",
-  "Sign up now": "common.signUp",
-  "Search...": "common.searchPlaceholder",
+	"Welcome to our platform": "hero.welcome",
+	"Get started with your journey today": "hero.getStarted",
+	"Sign up now": "common.signUp",
+	"Search...": "common.searchPlaceholder",
 };
 
 describe("codegen transform", () => {
-  it("wraps JSX text with t() calls", () => {
-    const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
-    const ast = parseFile(code, "before.tsx");
-    const result = transform(ast, textToKey);
+	it("wraps JSX text with t() calls", () => {
+		const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
+		const ast = parseFile(code, "before.tsx");
+		const result = transform(ast, textToKey);
 
-    expect(result.modified).toBe(true);
-    expect(result.stringsWrapped).toBe(4);
-    expect(result.code).toContain('t("hero.welcome")');
-    expect(result.code).toContain('t("hero.getStarted")');
-    expect(result.code).toContain('t("common.signUp")');
-    expect(result.code).toContain('t("common.searchPlaceholder")');
-  });
+		expect(result.modified).toBe(true);
+		expect(result.stringsWrapped).toBe(4);
+		expect(result.code).toContain('t("hero.welcome")');
+		expect(result.code).toContain('t("hero.getStarted")');
+		expect(result.code).toContain('t("common.signUp")');
+		expect(result.code).toContain('t("common.searchPlaceholder")');
+	});
 
-  it("injects getTranslations import for server components", () => {
-    const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
-    const ast = parseFile(code, "before.tsx");
-    const result = transform(ast, textToKey);
+	it("injects getTranslations import for server components", () => {
+		const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
+		const ast = parseFile(code, "before.tsx");
+		const result = transform(ast, textToKey);
 
-    expect(result.code).toContain(
-      'import { getTranslations } from "next-intl/server"',
-    );
-  });
+		expect(result.code).toContain(
+			'import { getTranslations } from "next-intl/server"',
+		);
+	});
 
-  it("injects const t = await getTranslations() and async for server components", () => {
-    const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
-    const ast = parseFile(code, "before.tsx");
-    const result = transform(ast, textToKey);
+	it("injects const t = await getTranslations() and async for server components", () => {
+		const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
+		const ast = parseFile(code, "before.tsx");
+		const result = transform(ast, textToKey);
 
-    expect(result.code).toContain("const t = await getTranslations()");
-    expect(result.code).toContain("async");
-  });
+		expect(result.code).toContain("const t = await getTranslations()");
+		expect(result.code).toContain("async");
+	});
 
-  it("is idempotent - does not double-wrap t() calls", () => {
-    const code = readFileSync(
-      join(fixturesDir, "already-wrapped.tsx"),
-      "utf-8",
-    );
-    const ast = parseFile(code, "already-wrapped.tsx");
-    const result = transform(ast, textToKey);
+	it("is idempotent - does not double-wrap t() calls", () => {
+		const code = readFileSync(
+			join(fixturesDir, "already-wrapped.tsx"),
+			"utf-8",
+		);
+		const ast = parseFile(code, "already-wrapped.tsx");
+		const result = transform(ast, textToKey);
 
-    expect(result.stringsWrapped).toBe(0);
-    expect(result.modified).toBe(false);
-  });
+		expect(result.stringsWrapped).toBe(0);
+		expect(result.modified).toBe(false);
+	});
 
-  it("does not modify files without matching strings", () => {
-    const code = `export default function Other() { return <div>No match</div>; }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, textToKey);
+	it("does not modify files without matching strings", () => {
+		const code = `export default function Other() { return <div>No match</div>; }`;
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, textToKey);
 
-    expect(result.modified).toBe(false);
-    expect(result.stringsWrapped).toBe(0);
-  });
+		expect(result.modified).toBe(false);
+		expect(result.stringsWrapped).toBe(0);
+	});
 
-  it("wraps attribute strings", () => {
-    const code = `function Form() { return <input placeholder="Search..." />; }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, textToKey);
+	it("wraps attribute strings", () => {
+		const code = `function Form() { return <input placeholder="Search..." />; }`;
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, textToKey);
 
-    expect(result.modified).toBe(true);
-    // Single namespace "common" → useTranslations("common"), key stripped
-    expect(result.code).toContain(
-      'placeholder={t("searchPlaceholder")}',
-    );
-  });
+		expect(result.modified).toBe(true);
+		// Single namespace "common" → useTranslations("common"), key stripped
+		expect(result.code).toContain('placeholder={t("searchPlaceholder")}');
+	});
 
-  it("does NOT wrap non-translatable attribute props (e.g. size, variant)", () => {
-    const code = `function App() { return <Badge size="sm" variant="sm">sm</Badge>; }`;
-    const ast = parseFile(code, "test.tsx");
-    // "sm" is in textToKey but size/variant are NOT translatable props
-    const map = { sm: "common.sm" };
-    const result = transform(ast, map);
+	it("does NOT wrap non-translatable attribute props (e.g. size, variant)", () => {
+		const code = `function App() { return <Badge size="sm" variant="sm">sm</Badge>; }`;
+		const ast = parseFile(code, "test.tsx");
+		// "sm" is in textToKey but size/variant are NOT translatable props
+		const map = { sm: "common.sm" };
+		const result = transform(ast, map);
 
-    // JSX text "sm" SHOULD be wrapped
-    expect(result.code).toContain('t("sm")');
-    // size and variant attributes should NOT be wrapped
-    expect(result.code).toContain('size="sm"');
-    expect(result.code).toContain('variant="sm"');
-    expect(result.code).not.toContain('size={t(');
-    expect(result.code).not.toContain('variant={t(');
-  });
+		// JSX text "sm" SHOULD be wrapped
+		expect(result.code).toContain('t("sm")');
+		// size and variant attributes should NOT be wrapped
+		expect(result.code).toContain('size="sm"');
+		expect(result.code).toContain('variant="sm"');
+		expect(result.code).not.toContain("size={t(");
+		expect(result.code).not.toContain("variant={t(");
+	});
 
-  it("wraps translatable attribute props (placeholder, title, alt)", () => {
-    const code = `function App() { return <input placeholder="sm" title="sm" alt="sm" size="sm" />; }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { sm: "common.sm" };
-    const result = transform(ast, map);
+	it("wraps translatable attribute props (placeholder, title, alt)", () => {
+		const code = `function App() { return <input placeholder="sm" title="sm" alt="sm" size="sm" />; }`;
+		const ast = parseFile(code, "test.tsx");
+		const map = { sm: "common.sm" };
+		const result = transform(ast, map);
 
-    // placeholder, title, alt should be wrapped
-    expect(result.code).toContain('placeholder={t("sm")}');
-    expect(result.code).toContain('title={t("sm")}');
-    // size should NOT be wrapped
-    expect(result.code).toContain('size="sm"');
-  });
+		// placeholder, title, alt should be wrapped
+		expect(result.code).toContain('placeholder={t("sm")}');
+		expect(result.code).toContain('title={t("sm")}');
+		// size should NOT be wrapped
+		expect(result.code).toContain('size="sm"');
+	});
 
-  it("uses custom i18nImport", () => {
-    const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
-    const ast = parseFile(code, "before.tsx");
-    const result = transform(ast, textToKey, {
-      i18nImport: "my-i18n-lib",
-    });
+	it("uses custom i18nImport", () => {
+		const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
+		const ast = parseFile(code, "before.tsx");
+		const result = transform(ast, textToKey, {
+			i18nImport: "my-i18n-lib",
+		});
 
-    expect(result.code).toContain(
-      'import { useTranslations } from "my-i18n-lib"',
-    );
-  });
+		expect(result.code).toContain(
+			'import { useTranslations } from "my-i18n-lib"',
+		);
+	});
 
-  it("wraps text in mixed content and preserves whitespace", () => {
-    const code = `function Greeting({ name }) { return <p>Hello {name}</p>; }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { Hello: "greeting.hello" };
-    const result = transform(ast, map);
+	it("wraps text in mixed content and preserves whitespace", () => {
+		const code = `function Greeting({ name }) { return <p>Hello {name}</p>; }`;
+		const ast = parseFile(code, "test.tsx");
+		const map = { Hello: "greeting.hello" };
+		const result = transform(ast, map);
 
-    expect(result.stringsWrapped).toBe(1);
-    expect(result.modified).toBe(true);
-    // Single namespace "greeting" → key stripped to "hello"
-    expect(result.code).toContain('t("hello")');
-  });
+		expect(result.stringsWrapped).toBe(1);
+		expect(result.modified).toBe(true);
+		// Single namespace "greeting" → key stripped to "hello"
+		expect(result.code).toContain('t("hello")');
+	});
 
-  it("wraps text after nested elements", () => {
-    const code = `function Def() { return <li><strong>Term</strong>: a definition here.</li>; }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { ": a definition here.": "page.definition" };
-    const result = transform(ast, map);
+	it("wraps text after nested elements", () => {
+		const code = `function Def() { return <li><strong>Term</strong>: a definition here.</li>; }`;
+		const ast = parseFile(code, "test.tsx");
+		const map = { ": a definition here.": "page.definition" };
+		const result = transform(ast, map);
 
-    expect(result.stringsWrapped).toBe(1);
-    expect(result.modified).toBe(true);
-    // Single namespace "page" → key stripped to "definition"
-    expect(result.code).toContain('t("definition")');
-  });
+		expect(result.stringsWrapped).toBe(1);
+		expect(result.modified).toBe(true);
+		// Single namespace "page" → key stripped to "definition"
+		expect(result.code).toContain('t("definition")');
+	});
 
-  it("wraps text before components in mixed content", () => {
-    const code = `function CTA() { return <Button>Meet Mimir <ArrowRight /></Button>; }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { "Meet Mimir": "cta.meetMimir" };
-    const result = transform(ast, map);
+	it("wraps text before components in mixed content", () => {
+		const code = `function CTA() { return <Button>Meet Mimir <ArrowRight /></Button>; }`;
+		const ast = parseFile(code, "test.tsx");
+		const map = { "Meet Mimir": "cta.meetMimir" };
+		const result = transform(ast, map);
 
-    expect(result.stringsWrapped).toBe(1);
-    expect(result.modified).toBe(true);
-    // Single namespace "cta" → key stripped to "meetMimir"
-    expect(result.code).toContain('t("meetMimir")');
-  });
+		expect(result.stringsWrapped).toBe(1);
+		expect(result.modified).toBe(true);
+		// Single namespace "cta" → key stripped to "meetMimir"
+		expect(result.code).toContain('t("meetMimir")');
+	});
 
-  it("wraps strings in object property values", () => {
-    const code = `function Features() {
+	it("wraps strings in object property values", () => {
+		const code = `function Features() {
       const items = [
         { icon: Star, title: "Project Management", description: "Manage your projects." },
         { icon: Bolt, title: "Task Management", description: "Organize your tasks." },
       ];
       return <div>{items.map(i => <Card key={i.title} {...i} />)}</div>;
     }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = {
-      "Project Management": "features.projectManagement",
-      "Manage your projects.": "features.projectManagementDesc",
-      "Task Management": "features.taskManagement",
-      "Organize your tasks.": "features.taskManagementDesc",
-    };
-    const result = transform(ast, map);
+		const ast = parseFile(code, "test.tsx");
+		const map = {
+			"Project Management": "features.projectManagement",
+			"Manage your projects.": "features.projectManagementDesc",
+			"Task Management": "features.taskManagement",
+			"Organize your tasks.": "features.taskManagementDesc",
+		};
+		const result = transform(ast, map);
 
-    expect(result.stringsWrapped).toBe(4);
-    expect(result.modified).toBe(true);
-    // Single namespace "features" → keys stripped
-    expect(result.code).toContain('title: t("projectManagement")');
-    expect(result.code).toContain(
-      'description: t("projectManagementDesc")',
-    );
-    expect(result.code).toContain('title: t("taskManagement")');
-    expect(result.code).toContain(
-      'description: t("taskManagementDesc")',
-    );
-  });
+		expect(result.stringsWrapped).toBe(4);
+		expect(result.modified).toBe(true);
+		// Single namespace "features" → keys stripped
+		expect(result.code).toContain('title: t("projectManagement")');
+		expect(result.code).toContain('description: t("projectManagementDesc")');
+		expect(result.code).toContain('title: t("taskManagement")');
+		expect(result.code).toContain('description: t("taskManagementDesc")');
+	});
 
-  it("does not wrap non-content object properties", () => {
-    const code = `function App() {
+	it("does not wrap non-content object properties", () => {
+		const code = `function App() {
       const config = { icon: "star", className: "text-red", href: "/about" };
       return <div />;
     }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = {
-      star: "icon.star",
-      "text-red": "class.red",
-      "/about": "link.about",
-    };
-    const result = transform(ast, map);
+		const ast = parseFile(code, "test.tsx");
+		const map = {
+			star: "icon.star",
+			"text-red": "class.red",
+			"/about": "link.about",
+		};
+		const result = transform(ast, map);
 
-    expect(result.stringsWrapped).toBe(0);
-    expect(result.modified).toBe(false);
-  });
+		expect(result.stringsWrapped).toBe(0);
+		expect(result.modified).toBe(false);
+	});
 
-  it("does not transform object properties inside non-component callbacks", () => {
-    const code = `const MyMark = SomeLib.create(() => {
+	it("does not transform object properties inside non-component callbacks", () => {
+		const code = `const MyMark = SomeLib.create(() => {
       return { title: "Project Management" };
     });
     function App() { return <div />; }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { "Project Management": "features.projectManagement" };
-    const result = transform(ast, map);
+		const ast = parseFile(code, "test.tsx");
+		const map = { "Project Management": "features.projectManagement" };
+		const result = transform(ast, map);
 
-    expect(result.stringsWrapped).toBe(0);
-    expect(result.modified).toBe(false);
-    expect(result.code).toContain('title: "Project Management"');
-  });
+		expect(result.stringsWrapped).toBe(0);
+		expect(result.modified).toBe(false);
+		expect(result.code).toContain('title: "Project Management"');
+	});
 
-  it("injects t into each component that needs it in multi-component server files", () => {
-    const code = `function Header() {
+	it("injects t into each component that needs it in multi-component server files", () => {
+		const code = `function Header() {
   return <h1>Welcome to our platform</h1>;
 }
 function Footer() {
   return <p>Sign up now</p>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, textToKey);
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, textToKey);
 
-    expect(result.stringsWrapped).toBe(2);
-    // Header uses hero.welcome → namespace "hero"
-    expect(result.code).toMatch(
-      /async function Header\(\) \{\s*const t = await getTranslations\("hero"\)/,
-    );
-    // Footer uses common.signUp → namespace "common"
-    expect(result.code).toMatch(
-      /async function Footer\(\) \{\s*const t = await getTranslations\("common"\)/,
-    );
-  });
+		expect(result.stringsWrapped).toBe(2);
+		// Header uses hero.welcome → namespace "hero"
+		expect(result.code).toMatch(
+			/async function Header\(\) \{\s*const t = await getTranslations\("hero"\)/,
+		);
+		// Footer uses common.signUp → namespace "common"
+		expect(result.code).toMatch(
+			/async function Footer\(\) \{\s*const t = await getTranslations\("common"\)/,
+		);
+	});
 
-  it("injects t only into components that need it, not pre-existing ones", () => {
-    const code = `import { useTranslations } from "next-intl";
+	it("injects t only into components that need it, not pre-existing ones", () => {
+		const code = `import { useTranslations } from "next-intl";
 function Header() {
   const t = useTranslations();
   return <h1>{t("existing.key")}</h1>;
@@ -251,1398 +245,1433 @@ function Header() {
 function Footer() {
   return <p>Sign up now</p>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, textToKey);
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, textToKey);
 
-    expect(result.stringsWrapped).toBe(1);
-    // Footer gets t injected with namespace "common" (single key common.signUp)
-    expect(result.code).toMatch(
-      /function Footer\(\) \{\s*const t = useTranslations\("common"\)/,
-    );
-    // Header keeps its existing single t declaration
-    const headerMatches = result.code.match(
-      /function Header[\s\S]*?function Footer/,
-    );
-    const headerTCount = (
-      headerMatches?.[0].match(/useTranslations\(/g) || []
-    ).length;
-    expect(headerTCount).toBe(1);
-  });
+		expect(result.stringsWrapped).toBe(1);
+		// Footer gets t injected with namespace "common" (single key common.signUp)
+		expect(result.code).toMatch(
+			/function Footer\(\) \{\s*const t = useTranslations\("common"\)/,
+		);
+		// Header keeps its existing single t declaration
+		const headerMatches = result.code.match(
+			/function Header[\s\S]*?function Footer/,
+		);
+		const headerTCount = (headerMatches?.[0].match(/useTranslations\(/g) || [])
+			.length;
+		expect(headerTCount).toBe(1);
+	});
 
-  it("uses useTranslations for client components with 'use client' directive", () => {
-    const code = `"use client";\nexport default function Hero() { return <h1>Welcome to our platform</h1>; }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, textToKey);
+	it("uses useTranslations for client components with 'use client' directive", () => {
+		const code = `"use client";\nexport default function Hero() { return <h1>Welcome to our platform</h1>; }`;
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, textToKey);
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain(
-      'import { useTranslations } from "next-intl"',
-    );
-    // Single key hero.welcome → namespace "hero"
-    expect(result.code).toContain('const t = useTranslations("hero")');
-    expect(result.code).not.toContain("getTranslations");
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain(
+			'import { useTranslations } from "next-intl"',
+		);
+		// Single key hero.welcome → namespace "hero"
+		expect(result.code).toContain('const t = useTranslations("hero")');
+		expect(result.code).not.toContain("getTranslations");
+	});
 
-  it("detects components with hooks as client and uses useTranslations", () => {
-    const code = `import { useState } from "react";
+	it("detects components with hooks as client and uses useTranslations", () => {
+		const code = `import { useState } from "react";
 export default function Counter() {
   const [count, setCount] = useState(0);
   return <p>Welcome to our platform</p>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, textToKey);
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, textToKey);
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain(
-      'import { useTranslations } from "next-intl"',
-    );
-    // Single key hero.welcome → namespace "hero"
-    expect(result.code).toContain('const t = useTranslations("hero")');
-    expect(result.code).not.toContain("getTranslations");
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain(
+			'import { useTranslations } from "next-intl"',
+		);
+		// Single key hero.welcome → namespace "hero"
+		expect(result.code).toContain('const t = useTranslations("hero")');
+		expect(result.code).not.toContain("getTranslations");
+	});
 
-  it("detects aliased hooks imported from react as client", () => {
-    const code = `import { useState as s } from "react";
+	it("detects aliased hooks imported from react as client", () => {
+		const code = `import { useState as s } from "react";
 export default function Counter() {
   const [count, setCount] = s(0);
   return <p>Welcome to our platform</p>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, textToKey);
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, textToKey);
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain(
-      'import { useTranslations } from "next-intl"',
-    );
-    expect(result.code).toContain('const t = useTranslations("hero")');
-    expect(result.code).not.toContain("getTranslations");
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain(
+			'import { useTranslations } from "next-intl"',
+		);
+		expect(result.code).toContain('const t = useTranslations("hero")');
+		expect(result.code).not.toContain("getTranslations");
+	});
 
-  it("does not treat arbitrary string statements as client directives", () => {
-    const code = `"not a client directive";
+	it("does not treat arbitrary string statements as client directives", () => {
+		const code = `"not a client directive";
 export default function Hero() { return <h1>Welcome to our platform</h1>; }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, textToKey);
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, textToKey);
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain(
-      'import { getTranslations } from "next-intl/server"',
-    );
-    expect(result.code).toContain('const t = await getTranslations("hero")');
-    expect(result.code).not.toContain("useTranslations(");
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain(
+			'import { getTranslations } from "next-intl/server"',
+		);
+		expect(result.code).toContain('const t = await getTranslations("hero")');
+		expect(result.code).not.toContain("useTranslations(");
+	});
 
-  it("forceClient: true forces useTranslations even for server components", () => {
-    const code = `export default function Hero() { return <h1>Welcome to our platform</h1>; }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, textToKey, { forceClient: true });
+	it("forceClient: true forces useTranslations even for server components", () => {
+		const code = `export default function Hero() { return <h1>Welcome to our platform</h1>; }`;
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, textToKey, { forceClient: true });
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain(
-      'import { useTranslations } from "next-intl"',
-    );
-    // Single key hero.welcome → namespace "hero"
-    expect(result.code).toContain('const t = useTranslations("hero")');
-    expect(result.code).not.toContain("getTranslations");
-    expect(result.code).toContain('"use client"');
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain(
+			'import { useTranslations } from "next-intl"',
+		);
+		// Single key hero.welcome → namespace "hero"
+		expect(result.code).toContain('const t = useTranslations("hero")');
+		expect(result.code).not.toContain("getTranslations");
+		expect(result.code).toContain('"use client"');
+	});
 
-  it("makes arrow function server components async with await getTranslations", () => {
-    const code = `const Hero = () => { return <h1>Welcome to our platform</h1>; };`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, textToKey);
+	it("makes arrow function server components async with await getTranslations", () => {
+		const code = `const Hero = () => { return <h1>Welcome to our platform</h1>; };`;
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, textToKey);
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain(
-      'import { getTranslations } from "next-intl/server"',
-    );
-    // Single key hero.welcome → namespace "hero"
-    expect(result.code).toContain('const t = await getTranslations("hero")');
-    expect(result.code).toMatch(/async \(\) =>/);
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain(
+			'import { getTranslations } from "next-intl/server"',
+		);
+		// Single key hero.welcome → namespace "hero"
+		expect(result.code).toContain('const t = await getTranslations("hero")');
+		expect(result.code).toMatch(/async \(\) =>/);
+	});
 
-  it("preserves already async server components", () => {
-    const code = `export default async function Page() { return <h1>Welcome to our platform</h1>; }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, textToKey);
+	it("preserves already async server components", () => {
+		const code = `export default async function Page() { return <h1>Welcome to our platform</h1>; }`;
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, textToKey);
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain("async function Page");
-    // Single key hero.welcome → namespace "hero"
-    expect(result.code).toContain('const t = await getTranslations("hero")');
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain("async function Page");
+		// Single key hero.welcome → namespace "hero"
+		expect(result.code).toContain('const t = await getTranslations("hero")');
+	});
 
-  it("injects getTranslations for anonymous default arrow exports", () => {
-    const code = `export default () => <h1>Welcome to our platform</h1>;`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, textToKey);
+	it("injects getTranslations for anonymous default arrow exports", () => {
+		const code = `export default () => <h1>Welcome to our platform</h1>;`;
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, textToKey);
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain('await getTranslations("hero")');
-    expect(result.code).toContain('t("welcome")');
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain('await getTranslations("hero")');
+		expect(result.code).toContain('t("welcome")');
+	});
 
-  it("custom i18nImport does not apply server/client split", () => {
-    const code = `export default function Hero() { return <h1>Welcome to our platform</h1>; }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, textToKey, {
-      i18nImport: "my-i18n-lib",
-    });
+	it("custom i18nImport does not apply server/client split", () => {
+		const code = `export default function Hero() { return <h1>Welcome to our platform</h1>; }`;
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, textToKey, {
+			i18nImport: "my-i18n-lib",
+		});
 
-    expect(result.code).toContain(
-      'import { useTranslations } from "my-i18n-lib"',
-    );
-    // Single key hero.welcome → namespace "hero"
-    expect(result.code).toContain('const t = useTranslations("hero")');
-    expect(result.code).not.toContain("getTranslations");
-  });
+		expect(result.code).toContain(
+			'import { useTranslations } from "my-i18n-lib"',
+		);
+		// Single key hero.welcome → namespace "hero"
+		expect(result.code).toContain('const t = useTranslations("hero")');
+		expect(result.code).not.toContain("getTranslations");
+	});
 
-  it("reuses aliased useTranslations import instead of injecting a new one", () => {
-    const code = `"use client";
+	it("reuses aliased useTranslations import instead of injecting a new one", () => {
+		const code = `"use client";
 import { useTranslations as useI18n } from "next-intl";
 export default function Hero() {
   const t = useI18n();
   return <h1>Welcome to our platform</h1>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, textToKey);
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, textToKey);
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain("useI18n");
-    expect(result.code).toContain('const t = useI18n("hero")');
-    expect((result.code.match(/const t\s*=/g) || []).length).toBe(1);
-    expect(result.code).not.toContain(
-      'import { useTranslations } from "next-intl"',
-    );
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain("useI18n");
+		expect(result.code).toContain('const t = useI18n("hero")');
+		expect((result.code.match(/const t\s*=/g) || []).length).toBe(1);
+		expect(result.code).not.toContain(
+			'import { useTranslations } from "next-intl"',
+		);
+	});
 
-  it("reuses aliased getTranslations import on server components", () => {
-    const code = `import { getTranslations as getT } from "next-intl/server";
+	it("reuses aliased getTranslations import on server components", () => {
+		const code = `import { getTranslations as getT } from "next-intl/server";
 export default async function Hero() {
   const t = await getT();
   return <h1>Welcome to our platform</h1>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, textToKey);
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, textToKey);
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain("await getT(\"hero\")");
-    expect(result.code).toContain('t("welcome")');
-    expect((result.code.match(/const t\s*=/g) || []).length).toBe(1);
-    expect(result.code).not.toContain("getTranslations(");
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain('await getT("hero")');
+		expect(result.code).toContain('t("welcome")');
+		expect((result.code.match(/const t\s*=/g) || []).length).toBe(1);
+		expect(result.code).not.toContain("getTranslations(");
+	});
 
-  it("does not wrap module-level object properties like metadata", () => {
-    const code = `
+	it("does not wrap module-level object properties like metadata", () => {
+		const code = `
       export const metadata = {
         title: "My App",
         description: "A great application for everyone.",
       };
       export default function Layout({ children }) { return <div>{children}</div>; }
     `;
-    const ast = parseFile(code, "test.tsx");
-    const map = {
-      "My App": "meta.title",
-      "A great application for everyone.": "meta.description",
-    };
-    const result = transform(ast, map);
+		const ast = parseFile(code, "test.tsx");
+		const map = {
+			"My App": "meta.title",
+			"A great application for everyone.": "meta.description",
+		};
+		const result = transform(ast, map);
 
-    expect(result.stringsWrapped).toBe(0);
-    expect(result.modified).toBe(false);
-  });
+		expect(result.stringsWrapped).toBe(0);
+		expect(result.modified).toBe(false);
+	});
 });
 
 describe("codegen transform (inline mode)", () => {
-  const inlineOpts: TransformOptions = {
-    mode: "inline",
-    componentPath: "@/components/t",
-  };
+	const inlineOpts: TransformOptions = {
+		mode: "inline",
+		componentPath: "@/components/t",
+	};
 
-  it("wraps JSX text with <T> components", () => {
-    const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
-    const ast = parseFile(code, "before.tsx");
-    const result = transform(ast, textToKey, inlineOpts);
+	it("wraps JSX text with <T> components", () => {
+		const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
+		const ast = parseFile(code, "before.tsx");
+		const result = transform(ast, textToKey, inlineOpts);
 
-    expect(result.modified).toBe(true);
-    expect(result.stringsWrapped).toBe(4);
-    expect(result.code).toContain(
-      '<T id="hero.welcome">Welcome to our platform</T>',
-    );
-    expect(result.code).toContain(
-      '<T id="hero.getStarted">Get started with your journey today</T>',
-    );
-    expect(result.code).toContain('<T id="common.signUp">Sign up now</T>');
-  });
+		expect(result.modified).toBe(true);
+		expect(result.stringsWrapped).toBe(4);
+		expect(result.code).toContain(
+			'<T id="hero.welcome">Welcome to our platform</T>',
+		);
+		expect(result.code).toContain(
+			'<T id="hero.getStarted">Get started with your journey today</T>',
+		);
+		expect(result.code).toContain('<T id="common.signUp">Sign up now</T>');
+	});
 
-  it("wraps attributes with t(text, key) in inline mode", () => {
-    const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
-    const ast = parseFile(code, "before.tsx");
-    const result = transform(ast, textToKey, inlineOpts);
+	it("wraps attributes with t(text, key) in inline mode", () => {
+		const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
+		const ast = parseFile(code, "before.tsx");
+		const result = transform(ast, textToKey, inlineOpts);
 
-    expect(result.code).toContain('t("Search...", "common.searchPlaceholder")');
-  });
+		expect(result.code).toContain('t("Search...", "common.searchPlaceholder")');
+	});
 
-  it("does NOT wrap non-translatable attribute props in inline mode", () => {
-    const code = `function App() { return <Badge size="sm">sm</Badge>; }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { sm: "common.sm" };
-    const result = transform(ast, map, inlineOpts);
+	it("does NOT wrap non-translatable attribute props in inline mode", () => {
+		const code = `function App() { return <Badge size="sm">sm</Badge>; }`;
+		const ast = parseFile(code, "test.tsx");
+		const map = { sm: "common.sm" };
+		const result = transform(ast, map, inlineOpts);
 
-    // JSX text should be wrapped with <T>
-    expect(result.code).toContain("<T");
-    // size attribute should NOT be wrapped
-    expect(result.code).toContain('size="sm"');
-    expect(result.code).not.toContain('size={t(');
-  });
+		// JSX text should be wrapped with <T>
+		expect(result.code).toContain("<T");
+		// size attribute should NOT be wrapped
+		expect(result.code).toContain('size="sm"');
+		expect(result.code).not.toContain("size={t(");
+	});
 
-  it("injects T and useT import for client files", () => {
-    const code = `"use client";\nexport default function Hero() { return <h1>Welcome to our platform</h1>; }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, textToKey, inlineOpts);
+	it("injects T and useT import for client files", () => {
+		const code = `"use client";\nexport default function Hero() { return <h1>Welcome to our platform</h1>; }`;
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, textToKey, inlineOpts);
 
-    expect(result.code).toContain('import { T } from "@/components/t"');
-  });
+		expect(result.code).toContain('import { T } from "@/components/t"');
+	});
 
-  it("detects files with hooks as client even without 'use client' directive", () => {
-    const code = `import { useQuery } from "@tanstack/react-query";
+	it("detects files with hooks as client even without 'use client' directive", () => {
+		const code = `import { useQuery } from "@tanstack/react-query";
 import { usePathname } from "next/navigation";
 export const NavItem = () => {
   const pathname = usePathname();
   const { data } = useQuery({ queryKey: ["test"] });
   return <h1>Welcome to our platform</h1>;
 };`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, textToKey, inlineOpts);
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, textToKey, inlineOpts);
 
-    // Should import from client module since file uses hooks
-    expect(result.code).toContain('import { T } from "@/components/t"');
-    expect(result.code).not.toContain("t-server");
-  });
+		// Should import from client module since file uses hooks
+		expect(result.code).toContain('import { T } from "@/components/t"');
+		expect(result.code).not.toContain("t-server");
+	});
 
-  it("injects T and createT import for server files", () => {
-    const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
-    const ast = parseFile(code, "before.tsx");
-    const result = transform(ast, textToKey, inlineOpts);
+	it("injects T and createT import for server files", () => {
+		const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
+		const ast = parseFile(code, "before.tsx");
+		const result = transform(ast, textToKey, inlineOpts);
 
-    // Server file (no "use client" directive)
-    expect(result.code).toContain("@/components/t-server");
-  });
+		// Server file (no "use client" directive)
+		expect(result.code).toContain("@/components/t-server");
+	});
 
-  it("injects useT hook for client files with attributes", () => {
-    const code = `"use client";\nfunction Form() { return <input placeholder="Search..." />; }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, textToKey, inlineOpts);
+	it("injects useT hook for client files with attributes", () => {
+		const code = `"use client";\nfunction Form() { return <input placeholder="Search..." />; }`;
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, textToKey, inlineOpts);
 
-    expect(result.code).toContain("useT");
-    expect(result.code).toContain("const t = useT()");
-  });
+		expect(result.code).toContain("useT");
+		expect(result.code).toContain("const t = useT()");
+	});
 
-  it("injects createT for server files with attributes", () => {
-    const code = `function Form() { return <input placeholder="Search..." />; }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, textToKey, inlineOpts);
+	it("injects createT for server files with attributes", () => {
+		const code = `function Form() { return <input placeholder="Search..." />; }`;
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, textToKey, inlineOpts);
 
-    expect(result.code).toContain("createT");
-    expect(result.code).toContain("const t = await createT()");
-    expect(result.code).toMatch(/async function Form/);
-  });
+		expect(result.code).toContain("createT");
+		expect(result.code).toContain("const t = await createT()");
+		expect(result.code).toMatch(/async function Form/);
+	});
 
-  it("is idempotent - does not double-wrap <T> components", () => {
-    const code = readFileSync(
-      join(fixturesDir, "already-wrapped-inline.tsx"),
-      "utf-8",
-    );
-    const ast = parseFile(code, "already-wrapped-inline.tsx");
-    const result = transform(ast, textToKey, inlineOpts);
+	it("is idempotent - does not double-wrap <T> components", () => {
+		const code = readFileSync(
+			join(fixturesDir, "already-wrapped-inline.tsx"),
+			"utf-8",
+		);
+		const ast = parseFile(code, "already-wrapped-inline.tsx");
+		const result = transform(ast, textToKey, inlineOpts);
 
-    expect(result.stringsWrapped).toBe(0);
-    expect(result.modified).toBe(false);
-  });
+		expect(result.stringsWrapped).toBe(0);
+		expect(result.modified).toBe(false);
+	});
 
-  it("wraps strings in object property values with inline t(text, key)", () => {
-    const code = `function Features() {
+	it("wraps strings in object property values with inline t(text, key)", () => {
+		const code = `function Features() {
       const items = [
         { icon: Star, title: "Project Management", description: "Manage your projects." },
       ];
       return <div>{items.map(i => <Card key={i.title} {...i} />)}</div>;
     }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = {
-      "Project Management": "features.projectManagement",
-      "Manage your projects.": "features.projectManagementDesc",
-    };
-    const result = transform(ast, map, inlineOpts);
+		const ast = parseFile(code, "test.tsx");
+		const map = {
+			"Project Management": "features.projectManagement",
+			"Manage your projects.": "features.projectManagementDesc",
+		};
+		const result = transform(ast, map, inlineOpts);
 
-    expect(result.stringsWrapped).toBe(2);
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain(
-      'title: t("Project Management", "features.projectManagement")',
-    );
-    expect(result.code).toContain(
-      'description: t("Manage your projects.", "features.projectManagementDesc")',
-    );
-  });
+		expect(result.stringsWrapped).toBe(2);
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain(
+			'title: t("Project Management", "features.projectManagement")',
+		);
+		expect(result.code).toContain(
+			'description: t("Manage your projects.", "features.projectManagementDesc")',
+		);
+	});
 
-  it("does not modify files without matching strings", () => {
-    const code = `export default function Other() { return <div>No match</div>; }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, textToKey, inlineOpts);
+	it("does not modify files without matching strings", () => {
+		const code = `export default function Other() { return <div>No match</div>; }`;
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, textToKey, inlineOpts);
 
-    expect(result.modified).toBe(false);
-    expect(result.stringsWrapped).toBe(0);
-  });
+		expect(result.modified).toBe(false);
+		expect(result.stringsWrapped).toBe(0);
+	});
 
-  it("does not transform object properties inside non-component callbacks", () => {
-    const code = `const MyMark = SomeLib.create(() => {
+	it("does not transform object properties inside non-component callbacks", () => {
+		const code = `const MyMark = SomeLib.create(() => {
       return { title: "Project Management" };
     });
     function App() { return <div />; }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { "Project Management": "features.projectManagement" };
-    const result = transform(ast, map, inlineOpts);
+		const ast = parseFile(code, "test.tsx");
+		const map = { "Project Management": "features.projectManagement" };
+		const result = transform(ast, map, inlineOpts);
 
-    expect(result.stringsWrapped).toBe(0);
-    expect(result.modified).toBe(false);
-    expect(result.code).toContain('title: "Project Management"');
-  });
+		expect(result.stringsWrapped).toBe(0);
+		expect(result.modified).toBe(false);
+		expect(result.code).toContain('title: "Project Management"');
+	});
 
-  it("injects hook into each component that needs it in multi-component files", () => {
-    const code = `function Header() {
+	it("injects hook into each component that needs it in multi-component files", () => {
+		const code = `function Header() {
   return <input placeholder="Search..." />;
 }
 function Footer() {
   return <input placeholder="Search..." />;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, textToKey, inlineOpts);
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, textToKey, inlineOpts);
 
-    expect(result.stringsWrapped).toBe(2);
-    expect(result.code).toMatch(
-      /async function Header\(\) \{\s*const t = await createT\(\)/,
-    );
-    expect(result.code).toMatch(
-      /async function Footer\(\) \{\s*const t = await createT\(\)/,
-    );
-  });
+		expect(result.stringsWrapped).toBe(2);
+		expect(result.code).toMatch(
+			/async function Header\(\) \{\s*const t = await createT\(\)/,
+		);
+		expect(result.code).toMatch(
+			/async function Footer\(\) \{\s*const t = await createT\(\)/,
+		);
+	});
 
-  it("repairs createT(messages) → createT() when messages is not in scope", () => {
-    const code = `import { T, createT } from "@/components/t-server";
+	it("repairs createT(messages) → createT() when messages is not in scope", () => {
+		const code = `import { T, createT } from "@/components/t-server";
 export default function Logo() {
   const t = createT(messages);
   return <img alt={t("Mimir Logo", "logo.altText")} />;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, {}, inlineOpts);
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, {}, inlineOpts);
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain("createT()");
-    expect(result.code).not.toContain("createT(messages)");
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain("createT()");
+		expect(result.code).not.toContain("createT(messages)");
+	});
 
-  it("does NOT repair createT(messages) when messages IS in scope", () => {
-    const code = `import { createT } from "@/components/t-server";
+	it("does NOT repair createT(messages) when messages IS in scope", () => {
+		const code = `import { createT } from "@/components/t-server";
 import messages from "@/messages/es.json";
 export default function Logo() {
   const t = createT(messages);
   return <img alt={t("Mimir Logo", "logo.altText")} />;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, {}, inlineOpts);
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, {}, inlineOpts);
 
-    // messages is imported, so it's a valid binding — don't touch it
-    expect(result.code).toContain("createT(messages)");
-  });
+		// messages is imported, so it's a valid binding — don't touch it
+		expect(result.code).toContain("createT(messages)");
+	});
 });
 
 describe("codegen transform (template literals, keys mode)", () => {
-  it("transforms JSX expression template literal → t(key, { vars })", () => {
-    const code =
-      "function Greeting({ name }) { return <p>{`Hello ${name}`}</p>; }";
-    const ast = parseFile(code, "test.tsx");
-    const map = { "Hello {name}": "greeting.hello" };
-    const result = transform(ast, map);
+	it("transforms JSX expression template literal → t(key, { vars })", () => {
+		const code =
+			"function Greeting({ name }) { return <p>{`Hello ${name}`}</p>; }";
+		const ast = parseFile(code, "test.tsx");
+		const map = { "Hello {name}": "greeting.hello" };
+		const result = transform(ast, map);
 
-    expect(result.modified).toBe(true);
-    expect(result.stringsWrapped).toBe(1);
-    // Single namespace "greeting" → key stripped to "hello"
-    expect(result.code).toContain('t("hello"');
-    expect(result.code).toMatch(/t\("hello",\s*\{\s*name\s*\}\)/);
-  });
+		expect(result.modified).toBe(true);
+		expect(result.stringsWrapped).toBe(1);
+		// Single namespace "greeting" → key stripped to "hello"
+		expect(result.code).toContain('t("hello"');
+		expect(result.code).toMatch(/t\("hello",\s*\{\s*name\s*\}\)/);
+	});
 
-  it("transforms JSX attribute template literal → t(key, { vars })", () => {
-    const code =
-      "function App({ type }) { return <input placeholder={`Search ${type}`} />; }";
-    const ast = parseFile(code, "test.tsx");
-    const map = { "Search {type}": "common.searchType" };
-    const result = transform(ast, map);
+	it("transforms JSX attribute template literal → t(key, { vars })", () => {
+		const code =
+			"function App({ type }) { return <input placeholder={`Search ${type}`} />; }";
+		const ast = parseFile(code, "test.tsx");
+		const map = { "Search {type}": "common.searchType" };
+		const result = transform(ast, map);
 
-    expect(result.modified).toBe(true);
-    expect(result.stringsWrapped).toBe(1);
-    // Single namespace "common" → key stripped to "searchType"
-    expect(result.code).toContain('t("searchType"');
-    expect(result.code).toMatch(/t\("searchType",\s*\{\s*type\s*\}\)/);
-  });
+		expect(result.modified).toBe(true);
+		expect(result.stringsWrapped).toBe(1);
+		// Single namespace "common" → key stripped to "searchType"
+		expect(result.code).toContain('t("searchType"');
+		expect(result.code).toMatch(/t\("searchType",\s*\{\s*type\s*\}\)/);
+	});
 
-  it("transforms object property template literal → t(key, { vars })", () => {
-    const code = `function App({ id }) {
+	it("transforms object property template literal → t(key, { vars })", () => {
+		const code = `function App({ id }) {
       const item = { title: \`Task \${id}\` };
       return <div />;
     }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { "Task {id}": "task.title" };
-    const result = transform(ast, map);
+		const ast = parseFile(code, "test.tsx");
+		const map = { "Task {id}": "task.title" };
+		const result = transform(ast, map);
 
-    expect(result.modified).toBe(true);
-    expect(result.stringsWrapped).toBe(1);
-    // Single namespace "task" → key stripped to "title"
-    expect(result.code).toContain('t("title"');
-    expect(result.code).toMatch(/t\("title",\s*\{\s*id\s*\}\)/);
-  });
+		expect(result.modified).toBe(true);
+		expect(result.stringsWrapped).toBe(1);
+		// Single namespace "task" → key stripped to "title"
+		expect(result.code).toContain('t("title"');
+		expect(result.code).toMatch(/t\("title",\s*\{\s*id\s*\}\)/);
+	});
 
-  it("transforms plain template literal → t(key) without values object", () => {
-    const code = "function App() { return <p>{`Hello world`}</p>; }";
-    const ast = parseFile(code, "test.tsx");
-    const map = { "Hello world": "greeting.helloWorld" };
-    const result = transform(ast, map);
+	it("transforms plain template literal → t(key) without values object", () => {
+		const code = "function App() { return <p>{`Hello world`}</p>; }";
+		const ast = parseFile(code, "test.tsx");
+		const map = { "Hello world": "greeting.helloWorld" };
+		const result = transform(ast, map);
 
-    expect(result.modified).toBe(true);
-    expect(result.stringsWrapped).toBe(1);
-    // Single namespace "greeting" → key stripped to "helloWorld"
-    expect(result.code).toContain('t("helloWorld")');
-    expect(result.code).not.toContain("{})");
-  });
+		expect(result.modified).toBe(true);
+		expect(result.stringsWrapped).toBe(1);
+		// Single namespace "greeting" → key stripped to "helloWorld"
+		expect(result.code).toContain('t("helloWorld")');
+		expect(result.code).not.toContain("{})");
+	});
 
-  it("leaves unmapped template literal intact", () => {
-    const code = "function App({ name }) { return <p>{`Hello ${name}`}</p>; }";
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, {});
+	it("leaves unmapped template literal intact", () => {
+		const code = "function App({ name }) { return <p>{`Hello ${name}`}</p>; }";
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, {});
 
-    expect(result.modified).toBe(false);
-    expect(result.stringsWrapped).toBe(0);
-    expect(result.code).toContain("`Hello ${name}`");
-  });
+		expect(result.modified).toBe(false);
+		expect(result.stringsWrapped).toBe(0);
+		expect(result.code).toContain("`Hello ${name}`");
+	});
 });
 
 describe("codegen transform (conditional expressions, keys mode)", () => {
-  it("transforms basic ternary in JSX expression", () => {
-    const code = `function App({ isAdmin }) { return <p>{isAdmin ? "Admin Panel" : "Dashboard"}</p>; }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { "Admin Panel": "admin.panel", Dashboard: "dashboard.title" };
-    const result = transform(ast, map);
+	it("transforms basic ternary in JSX expression", () => {
+		const code = `function App({ isAdmin }) { return <p>{isAdmin ? "Admin Panel" : "Dashboard"}</p>; }`;
+		const ast = parseFile(code, "test.tsx");
+		const map = { "Admin Panel": "admin.panel", Dashboard: "dashboard.title" };
+		const result = transform(ast, map);
 
-    expect(result.modified).toBe(true);
-    expect(result.stringsWrapped).toBe(2);
-    expect(result.code).toContain('t("admin.panel")');
-    expect(result.code).toContain('t("dashboard.title")');
-    expect(result.code).toMatch(
-      /isAdmin\s*\?\s*t\("admin\.panel"\)\s*:\s*t\("dashboard\.title"\)/,
-    );
-  });
+		expect(result.modified).toBe(true);
+		expect(result.stringsWrapped).toBe(2);
+		expect(result.code).toContain('t("admin.panel")');
+		expect(result.code).toContain('t("dashboard.title")');
+		expect(result.code).toMatch(
+			/isAdmin\s*\?\s*t\("admin\.panel"\)\s*:\s*t\("dashboard\.title"\)/,
+		);
+	});
 
-  it("transforms ternary in JSX attribute", () => {
-    const code = `function App({ isAdmin }) { return <input placeholder={isAdmin ? "Search users" : "Search items"} />; }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = {
-      "Search users": "search.users",
-      "Search items": "search.items",
-    };
-    const result = transform(ast, map);
+	it("transforms ternary in JSX attribute", () => {
+		const code = `function App({ isAdmin }) { return <input placeholder={isAdmin ? "Search users" : "Search items"} />; }`;
+		const ast = parseFile(code, "test.tsx");
+		const map = {
+			"Search users": "search.users",
+			"Search items": "search.items",
+		};
+		const result = transform(ast, map);
 
-    expect(result.modified).toBe(true);
-    expect(result.stringsWrapped).toBe(2);
-    // Single namespace "search" → keys stripped
-    expect(result.code).toContain('t("users")');
-    expect(result.code).toContain('t("items")');
-  });
+		expect(result.modified).toBe(true);
+		expect(result.stringsWrapped).toBe(2);
+		// Single namespace "search" → keys stripped
+		expect(result.code).toContain('t("users")');
+		expect(result.code).toContain('t("items")');
+	});
 
-  it("transforms ternary in object property", () => {
-    const code = `function App({ isAdmin }) {
+	it("transforms ternary in object property", () => {
+		const code = `function App({ isAdmin }) {
       const item = { title: isAdmin ? "Admin" : "User" };
       return <div />;
     }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { Admin: "role.admin", User: "role.user" };
-    const result = transform(ast, map);
+		const ast = parseFile(code, "test.tsx");
+		const map = { Admin: "role.admin", User: "role.user" };
+		const result = transform(ast, map);
 
-    expect(result.modified).toBe(true);
-    expect(result.stringsWrapped).toBe(2);
-    // Single namespace "role" → keys stripped
-    expect(result.code).toContain('t("admin")');
-    expect(result.code).toContain('t("user")');
-  });
+		expect(result.modified).toBe(true);
+		expect(result.stringsWrapped).toBe(2);
+		// Single namespace "role" → keys stripped
+		expect(result.code).toContain('t("admin")');
+		expect(result.code).toContain('t("user")');
+	});
 
-  it("transforms only mapped branch (mixed ternary)", () => {
-    const code = `function App({ isAdmin, role }) { return <p>{isAdmin ? "Admin" : role}</p>; }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { Admin: "role.admin" };
-    const result = transform(ast, map);
+	it("transforms only mapped branch (mixed ternary)", () => {
+		const code = `function App({ isAdmin, role }) { return <p>{isAdmin ? "Admin" : role}</p>; }`;
+		const ast = parseFile(code, "test.tsx");
+		const map = { Admin: "role.admin" };
+		const result = transform(ast, map);
 
-    expect(result.modified).toBe(true);
-    expect(result.stringsWrapped).toBe(1);
-    // Single namespace "role" → key stripped to "admin"
-    expect(result.code).toContain('t("admin")');
-    expect(result.code).toMatch(/isAdmin\s*\?\s*t\("admin"\)\s*:\s*role/);
-  });
+		expect(result.modified).toBe(true);
+		expect(result.stringsWrapped).toBe(1);
+		// Single namespace "role" → key stripped to "admin"
+		expect(result.code).toContain('t("admin")');
+		expect(result.code).toMatch(/isAdmin\s*\?\s*t\("admin"\)\s*:\s*role/);
+	});
 
-  it("transforms nested ternaries", () => {
-    const code = `function App({ a, b }) { return <p>{a ? "X" : b ? "Y" : "Z"}</p>; }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { X: "key.x", Y: "key.y", Z: "key.z" };
-    const result = transform(ast, map);
+	it("transforms nested ternaries", () => {
+		const code = `function App({ a, b }) { return <p>{a ? "X" : b ? "Y" : "Z"}</p>; }`;
+		const ast = parseFile(code, "test.tsx");
+		const map = { X: "key.x", Y: "key.y", Z: "key.z" };
+		const result = transform(ast, map);
 
-    expect(result.modified).toBe(true);
-    expect(result.stringsWrapped).toBe(3);
-    // Single namespace "key" → keys stripped
-    expect(result.code).toContain('t("x")');
-    expect(result.code).toContain('t("y")');
-    expect(result.code).toContain('t("z")');
-  });
+		expect(result.modified).toBe(true);
+		expect(result.stringsWrapped).toBe(3);
+		// Single namespace "key" → keys stripped
+		expect(result.code).toContain('t("x")');
+		expect(result.code).toContain('t("y")');
+		expect(result.code).toContain('t("z")');
+	});
 
-  it("leaves unmapped ternary intact", () => {
-    const code = `function App({ isAdmin }) { return <p>{isAdmin ? "Admin Panel" : "Dashboard"}</p>; }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, {});
+	it("leaves unmapped ternary intact", () => {
+		const code = `function App({ isAdmin }) { return <p>{isAdmin ? "Admin Panel" : "Dashboard"}</p>; }`;
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, {});
 
-    expect(result.modified).toBe(false);
-    expect(result.stringsWrapped).toBe(0);
-    expect(result.code).toContain('"Admin Panel"');
-    expect(result.code).toContain('"Dashboard"');
-  });
+		expect(result.modified).toBe(false);
+		expect(result.stringsWrapped).toBe(0);
+		expect(result.code).toContain('"Admin Panel"');
+		expect(result.code).toContain('"Dashboard"');
+	});
 });
 
 describe("codegen transform (template literals + conditionals, inline mode)", () => {
-  const inlineOpts: TransformOptions = {
-    mode: "inline",
-    componentPath: "@/components/t",
-  };
+	const inlineOpts: TransformOptions = {
+		mode: "inline",
+		componentPath: "@/components/t",
+	};
 
-  it("transforms template literal in JSX attribute → t(text, key, { vars })", () => {
-    const code =
-      "function App({ type }) { return <input placeholder={`Search ${type}`} />; }";
-    const ast = parseFile(code, "test.tsx");
-    const map = { "Search {type}": "common.searchType" };
-    const result = transform(ast, map, inlineOpts);
+	it("transforms template literal in JSX attribute → t(text, key, { vars })", () => {
+		const code =
+			"function App({ type }) { return <input placeholder={`Search ${type}`} />; }";
+		const ast = parseFile(code, "test.tsx");
+		const map = { "Search {type}": "common.searchType" };
+		const result = transform(ast, map, inlineOpts);
 
-    expect(result.modified).toBe(true);
-    expect(result.stringsWrapped).toBe(1);
-    expect(result.code).toContain('t("Search {type}", "common.searchType"');
-    expect(result.code).toMatch(
-      /t\("Search \{type\}", "common\.searchType",\s*\{\s*type\s*\}\)/,
-    );
-  });
+		expect(result.modified).toBe(true);
+		expect(result.stringsWrapped).toBe(1);
+		expect(result.code).toContain('t("Search {type}", "common.searchType"');
+		expect(result.code).toMatch(
+			/t\("Search \{type\}", "common\.searchType",\s*\{\s*type\s*\}\)/,
+		);
+	});
 
-  it("transforms template literal in JSX expression → t(text, key, { vars })", () => {
-    const code =
-      "function Greeting({ name }) { return <p>{`Hello ${name}`}</p>; }";
-    const ast = parseFile(code, "test.tsx");
-    const map = { "Hello {name}": "greeting.hello" };
-    const result = transform(ast, map, inlineOpts);
+	it("transforms template literal in JSX expression → t(text, key, { vars })", () => {
+		const code =
+			"function Greeting({ name }) { return <p>{`Hello ${name}`}</p>; }";
+		const ast = parseFile(code, "test.tsx");
+		const map = { "Hello {name}": "greeting.hello" };
+		const result = transform(ast, map, inlineOpts);
 
-    expect(result.modified).toBe(true);
-    expect(result.stringsWrapped).toBe(1);
-    expect(result.code).toContain('t("Hello {name}", "greeting.hello"');
-    expect(result.code).toMatch(
-      /t\("Hello \{name\}", "greeting\.hello",\s*\{\s*name\s*\}\)/,
-    );
-  });
+		expect(result.modified).toBe(true);
+		expect(result.stringsWrapped).toBe(1);
+		expect(result.code).toContain('t("Hello {name}", "greeting.hello"');
+		expect(result.code).toMatch(
+			/t\("Hello \{name\}", "greeting\.hello",\s*\{\s*name\s*\}\)/,
+		);
+	});
 
-  it("transforms template literal in object property → t(text, key, { vars })", () => {
-    const code = `function App({ id }) {
+	it("transforms template literal in object property → t(text, key, { vars })", () => {
+		const code = `function App({ id }) {
       const item = { title: \`Task \${id}\` };
       return <div />;
     }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { "Task {id}": "task.title" };
-    const result = transform(ast, map, inlineOpts);
+		const ast = parseFile(code, "test.tsx");
+		const map = { "Task {id}": "task.title" };
+		const result = transform(ast, map, inlineOpts);
 
-    expect(result.modified).toBe(true);
-    expect(result.stringsWrapped).toBe(1);
-    expect(result.code).toContain('t("Task {id}", "task.title"');
-    expect(result.code).toMatch(
-      /t\("Task \{id\}", "task\.title",\s*\{\s*id\s*\}\)/,
-    );
-  });
+		expect(result.modified).toBe(true);
+		expect(result.stringsWrapped).toBe(1);
+		expect(result.code).toContain('t("Task {id}", "task.title"');
+		expect(result.code).toMatch(
+			/t\("Task \{id\}", "task\.title",\s*\{\s*id\s*\}\)/,
+		);
+	});
 
-  it("transforms plain template literal without values arg", () => {
-    const code = "function App() { return <p>{`Hello world`}</p>; }";
-    const ast = parseFile(code, "test.tsx");
-    const map = { "Hello world": "greeting.helloWorld" };
-    const result = transform(ast, map, inlineOpts);
+	it("transforms plain template literal without values arg", () => {
+		const code = "function App() { return <p>{`Hello world`}</p>; }";
+		const ast = parseFile(code, "test.tsx");
+		const map = { "Hello world": "greeting.helloWorld" };
+		const result = transform(ast, map, inlineOpts);
 
-    expect(result.modified).toBe(true);
-    expect(result.stringsWrapped).toBe(1);
-    expect(result.code).toContain('t("Hello world", "greeting.helloWorld")');
-    expect(result.code).not.toContain("{})");
-  });
+		expect(result.modified).toBe(true);
+		expect(result.stringsWrapped).toBe(1);
+		expect(result.code).toContain('t("Hello world", "greeting.helloWorld")');
+		expect(result.code).not.toContain("{})");
+	});
 
-  it("transforms ternary in JSX expression", () => {
-    const code = `function App({ isAdmin }) { return <p>{isAdmin ? "Admin" : "User"}</p>; }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { Admin: "role.admin", User: "role.user" };
-    const result = transform(ast, map, inlineOpts);
+	it("transforms ternary in JSX expression", () => {
+		const code = `function App({ isAdmin }) { return <p>{isAdmin ? "Admin" : "User"}</p>; }`;
+		const ast = parseFile(code, "test.tsx");
+		const map = { Admin: "role.admin", User: "role.user" };
+		const result = transform(ast, map, inlineOpts);
 
-    expect(result.modified).toBe(true);
-    expect(result.stringsWrapped).toBe(2);
-    expect(result.code).toContain('t("Admin", "role.admin")');
-    expect(result.code).toContain('t("User", "role.user")');
-    expect(result.code).toMatch(
-      /isAdmin\s*\?\s*t\("Admin", "role\.admin"\)\s*:\s*t\("User", "role\.user"\)/,
-    );
-  });
+		expect(result.modified).toBe(true);
+		expect(result.stringsWrapped).toBe(2);
+		expect(result.code).toContain('t("Admin", "role.admin")');
+		expect(result.code).toContain('t("User", "role.user")');
+		expect(result.code).toMatch(
+			/isAdmin\s*\?\s*t\("Admin", "role\.admin"\)\s*:\s*t\("User", "role\.user"\)/,
+		);
+	});
 
-  it("transforms ternary in JSX attribute", () => {
-    const code = `function App({ a }) { return <input placeholder={a ? "X" : "Y"} />; }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { X: "key.x", Y: "key.y" };
-    const result = transform(ast, map, inlineOpts);
+	it("transforms ternary in JSX attribute", () => {
+		const code = `function App({ a }) { return <input placeholder={a ? "X" : "Y"} />; }`;
+		const ast = parseFile(code, "test.tsx");
+		const map = { X: "key.x", Y: "key.y" };
+		const result = transform(ast, map, inlineOpts);
 
-    expect(result.modified).toBe(true);
-    expect(result.stringsWrapped).toBe(2);
-    expect(result.code).toContain('t("X", "key.x")');
-    expect(result.code).toContain('t("Y", "key.y")');
-  });
+		expect(result.modified).toBe(true);
+		expect(result.stringsWrapped).toBe(2);
+		expect(result.code).toContain('t("X", "key.x")');
+		expect(result.code).toContain('t("Y", "key.y")');
+	});
 
-  it("transforms ternary in object property", () => {
-    const code = `function App({ a }) {
+	it("transforms ternary in object property", () => {
+		const code = `function App({ a }) {
       const item = { title: a ? "Admin" : "User" };
       return <div />;
     }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { Admin: "role.admin", User: "role.user" };
-    const result = transform(ast, map, inlineOpts);
+		const ast = parseFile(code, "test.tsx");
+		const map = { Admin: "role.admin", User: "role.user" };
+		const result = transform(ast, map, inlineOpts);
 
-    expect(result.modified).toBe(true);
-    expect(result.stringsWrapped).toBe(2);
-    expect(result.code).toContain('t("Admin", "role.admin")');
-    expect(result.code).toContain('t("User", "role.user")');
-  });
+		expect(result.modified).toBe(true);
+		expect(result.stringsWrapped).toBe(2);
+		expect(result.code).toContain('t("Admin", "role.admin")');
+		expect(result.code).toContain('t("User", "role.user")');
+	});
 
-  it("transforms ternary with template literal branch", () => {
-    const code =
-      'function App({ a, n }) { return <p>{a ? `Hi ${n}` : "Guest"}</p>; }';
-    const ast = parseFile(code, "test.tsx");
-    const map = { "Hi {n}": "greeting.hi", Guest: "greeting.guest" };
-    const result = transform(ast, map, inlineOpts);
+	it("transforms ternary with template literal branch", () => {
+		const code =
+			'function App({ a, n }) { return <p>{a ? `Hi ${n}` : "Guest"}</p>; }';
+		const ast = parseFile(code, "test.tsx");
+		const map = { "Hi {n}": "greeting.hi", Guest: "greeting.guest" };
+		const result = transform(ast, map, inlineOpts);
 
-    expect(result.modified).toBe(true);
-    expect(result.stringsWrapped).toBe(2);
-    expect(result.code).toContain('t("Hi {n}", "greeting.hi"');
-    expect(result.code).toContain('t("Guest", "greeting.guest")');
-    expect(result.code).toMatch(/\{\s*n\s*\}/);
-  });
+		expect(result.modified).toBe(true);
+		expect(result.stringsWrapped).toBe(2);
+		expect(result.code).toContain('t("Hi {n}", "greeting.hi"');
+		expect(result.code).toContain('t("Guest", "greeting.guest")');
+		expect(result.code).toMatch(/\{\s*n\s*\}/);
+	});
 
-  it("transforms only mapped branch in mixed ternary", () => {
-    const code = `function App({ isAdmin, role }) { return <p>{isAdmin ? "Admin" : role}</p>; }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { Admin: "role.admin" };
-    const result = transform(ast, map, inlineOpts);
+	it("transforms only mapped branch in mixed ternary", () => {
+		const code = `function App({ isAdmin, role }) { return <p>{isAdmin ? "Admin" : role}</p>; }`;
+		const ast = parseFile(code, "test.tsx");
+		const map = { Admin: "role.admin" };
+		const result = transform(ast, map, inlineOpts);
 
-    expect(result.modified).toBe(true);
-    expect(result.stringsWrapped).toBe(1);
-    expect(result.code).toContain('t("Admin", "role.admin")');
-    expect(result.code).toMatch(
-      /isAdmin\s*\?\s*t\("Admin", "role\.admin"\)\s*:\s*role/,
-    );
-  });
+		expect(result.modified).toBe(true);
+		expect(result.stringsWrapped).toBe(1);
+		expect(result.code).toContain('t("Admin", "role.admin")');
+		expect(result.code).toMatch(
+			/isAdmin\s*\?\s*t\("Admin", "role\.admin"\)\s*:\s*role/,
+		);
+	});
 
-  it("leaves unmapped template literal and ternary intact", () => {
-    const code = "function App({ name }) { return <p>{`Hello ${name}`}</p>; }";
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, {}, inlineOpts);
+	it("leaves unmapped template literal and ternary intact", () => {
+		const code = "function App({ name }) { return <p>{`Hello ${name}`}</p>; }";
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, {}, inlineOpts);
 
-    expect(result.modified).toBe(false);
-    expect(result.stringsWrapped).toBe(0);
-    expect(result.code).toContain("`Hello ${name}`");
-  });
+		expect(result.modified).toBe(false);
+		expect(result.stringsWrapped).toBe(0);
+		expect(result.code).toContain("`Hello ${name}`");
+	});
 });
 
 describe("codegen transform (namespace detection)", () => {
-  it("assigns namespace when all keys share the same prefix", () => {
-    const code = `function Hero() {
+	it("assigns namespace when all keys share the same prefix", () => {
+		const code = `function Hero() {
   return <div><h1>Welcome to our platform</h1><p>Get started with your journey today</p></div>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = {
-      "Welcome to our platform": "hero.welcome",
-      "Get started with your journey today": "hero.getStarted",
-    };
-    const result = transform(ast, map);
+		const ast = parseFile(code, "test.tsx");
+		const map = {
+			"Welcome to our platform": "hero.welcome",
+			"Get started with your journey today": "hero.getStarted",
+		};
+		const result = transform(ast, map);
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain('getTranslations("hero")');
-    expect(result.code).toContain('t("welcome")');
-    expect(result.code).toContain('t("getStarted")');
-    expect(result.code).not.toContain('t("hero.');
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain('getTranslations("hero")');
+		expect(result.code).toContain('t("welcome")');
+		expect(result.code).toContain('t("getStarted")');
+		expect(result.code).not.toContain('t("hero.');
+	});
 
-  it("does not assign namespace when keys have mixed prefixes", () => {
-    const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
-    const ast = parseFile(code, "before.tsx");
-    const result = transform(ast, textToKey);
+	it("does not assign namespace when keys have mixed prefixes", () => {
+		const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
+		const ast = parseFile(code, "before.tsx");
+		const result = transform(ast, textToKey);
 
-    // textToKey has hero.* and common.* → mixed → no namespace
-    expect(result.code).toContain("getTranslations()");
-    expect(result.code).toContain('t("hero.welcome")');
-    expect(result.code).toContain('t("common.signUp")');
-  });
+		// textToKey has hero.* and common.* → mixed → no namespace
+		expect(result.code).toContain("getTranslations()");
+		expect(result.code).toContain('t("hero.welcome")');
+		expect(result.code).toContain('t("common.signUp")');
+	});
 
-  it("does not assign namespace when keys have no dot", () => {
-    const code = `function App() { return <h1>Hello</h1>; }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { Hello: "greeting" };
-    const result = transform(ast, map);
+	it("does not assign namespace when keys have no dot", () => {
+		const code = `function App() { return <h1>Hello</h1>; }`;
+		const ast = parseFile(code, "test.tsx");
+		const map = { Hello: "greeting" };
+		const result = transform(ast, map);
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain("getTranslations()");
-    expect(result.code).toContain('t("greeting")');
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain("getTranslations()");
+		expect(result.code).toContain('t("greeting")');
+	});
 
-  it("handles 3+ level keys (namespace = first segment)", () => {
-    const code = `function Settings() {
+	it("handles 3+ level keys (namespace = first segment)", () => {
+		const code = `function Settings() {
       return <div><h1>Profile Settings</h1><p>Change your name</p></div>;
     }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = {
-      "Profile Settings": "settings.profile.title",
-      "Change your name": "settings.profile.changeName",
-    };
-    const result = transform(ast, map);
+		const ast = parseFile(code, "test.tsx");
+		const map = {
+			"Profile Settings": "settings.profile.title",
+			"Change your name": "settings.profile.changeName",
+		};
+		const result = transform(ast, map);
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain('getTranslations("settings")');
-    expect(result.code).toContain('t("profile.title")');
-    expect(result.code).toContain('t("profile.changeName")');
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain('getTranslations("settings")');
+		expect(result.code).toContain('t("profile.title")');
+		expect(result.code).toContain('t("profile.changeName")');
+	});
 
-  it("assigns different namespaces to different components in the same file", () => {
-    const code = `function Hero() {
+	it("assigns different namespaces to different components in the same file", () => {
+		const code = `function Hero() {
   return <h1>Welcome</h1>;
 }
 function Footer() {
   return <p>Copyright notice</p>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = {
-      Welcome: "hero.welcome",
-      "Copyright notice": "footer.copyright",
-    };
-    const result = transform(ast, map);
+		const ast = parseFile(code, "test.tsx");
+		const map = {
+			Welcome: "hero.welcome",
+			"Copyright notice": "footer.copyright",
+		};
+		const result = transform(ast, map);
 
-    expect(result.code).toContain('getTranslations("hero")');
-    expect(result.code).toContain('getTranslations("footer")');
-    expect(result.code).toContain('t("welcome")');
-    expect(result.code).toContain('t("copyright")');
-  });
+		expect(result.code).toContain('getTranslations("hero")');
+		expect(result.code).toContain('getTranslations("footer")');
+		expect(result.code).toContain('t("welcome")');
+		expect(result.code).toContain('t("copyright")');
+	});
 
-  it("returns usedKeys in the result", () => {
-    const code = `function Hero() {
+	it("returns usedKeys in the result", () => {
+		const code = `function Hero() {
   return <div><h1>Welcome to our platform</h1><button>Sign up now</button></div>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = {
-      "Welcome to our platform": "hero.welcome",
-      "Sign up now": "common.signUp",
-    };
-    const result = transform(ast, map);
+		const ast = parseFile(code, "test.tsx");
+		const map = {
+			"Welcome to our platform": "hero.welcome",
+			"Sign up now": "common.signUp",
+		};
+		const result = transform(ast, map);
 
-    expect(result.usedKeys).toContain("hero.welcome");
-    expect(result.usedKeys).toContain("common.signUp");
-    expect(result.usedKeys).toHaveLength(2);
-  });
+		expect(result.usedKeys).toContain("hero.welcome");
+		expect(result.usedKeys).toContain("common.signUp");
+		expect(result.usedKeys).toHaveLength(2);
+	});
 
-  it("returns empty usedKeys when no strings are wrapped", () => {
-    const code = `export default function Other() { return <div>No match</div>; }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, textToKey);
+	it("returns empty usedKeys when no strings are wrapped", () => {
+		const code = `export default function Other() { return <div>No match</div>; }`;
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, textToKey);
 
-    expect(result.usedKeys).toEqual([]);
-  });
+		expect(result.usedKeys).toEqual([]);
+	});
 
-  it("updates existing useTranslations() without namespace to include namespace", () => {
-    const code = `import { useTranslations } from "next-intl";
+	it("updates existing useTranslations() without namespace to include namespace", () => {
+		const code = `import { useTranslations } from "next-intl";
 "use client";
 function Hero() {
   const t = useTranslations();
   return <div><h1>Welcome to our platform</h1><p>Get started with your journey today</p></div>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = {
-      "Welcome to our platform": "hero.welcome",
-      "Get started with your journey today": "hero.getStarted",
-    };
-    const result = transform(ast, map);
+		const ast = parseFile(code, "test.tsx");
+		const map = {
+			"Welcome to our platform": "hero.welcome",
+			"Get started with your journey today": "hero.getStarted",
+		};
+		const result = transform(ast, map);
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain('useTranslations("hero")');
-    expect(result.code).toContain('t("welcome")');
-    expect(result.code).toContain('t("getStarted")');
-    expect(result.code).not.toContain('t("hero.');
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain('useTranslations("hero")');
+		expect(result.code).toContain('t("welcome")');
+		expect(result.code).toContain('t("getStarted")');
+		expect(result.code).not.toContain('t("hero.');
+	});
 
-  it("updates existing useTranslations('other') to the correct namespace", () => {
-    const code = `import { useTranslations } from "next-intl";
+	it("updates existing useTranslations('other') to the correct namespace", () => {
+		const code = `import { useTranslations } from "next-intl";
 "use client";
 function Hero() {
   const t = useTranslations("other");
   return <h1>Welcome to our platform</h1>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = {
-      "Welcome to our platform": "hero.welcome",
-    };
-    const result = transform(ast, map);
+		const ast = parseFile(code, "test.tsx");
+		const map = {
+			"Welcome to our platform": "hero.welcome",
+		};
+		const result = transform(ast, map);
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain('useTranslations("hero")');
-    expect(result.code).toContain('t("welcome")');
-    expect(result.code).not.toContain('useTranslations("other")');
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain('useTranslations("hero")');
+		expect(result.code).toContain('t("welcome")');
+		expect(result.code).not.toContain('useTranslations("other")');
+	});
 
-  it("keeps existing useTranslations('hero') when namespace matches", () => {
-    const code = `import { useTranslations } from "next-intl";
+	it("keeps existing useTranslations('hero') when namespace matches", () => {
+		const code = `import { useTranslations } from "next-intl";
 "use client";
 function Hero() {
   const t = useTranslations("hero");
   return <h1>Welcome to our platform</h1>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = {
-      "Welcome to our platform": "hero.welcome",
-    };
-    const result = transform(ast, map);
+		const ast = parseFile(code, "test.tsx");
+		const map = {
+			"Welcome to our platform": "hero.welcome",
+		};
+		const result = transform(ast, map);
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain('useTranslations("hero")');
-    expect(result.code).toContain('t("welcome")');
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain('useTranslations("hero")');
+		expect(result.code).toContain('t("welcome")');
+	});
 
-  it("updates existing await getTranslations() without namespace (server component)", () => {
-    const code = `import { getTranslations } from "next-intl/server";
+	it("updates existing await getTranslations() without namespace (server component)", () => {
+		const code = `import { getTranslations } from "next-intl/server";
 export default async function Hero() {
   const t = await getTranslations();
   return <h1>Welcome to our platform</h1>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = {
-      "Welcome to our platform": "hero.welcome",
-    };
-    const result = transform(ast, map);
+		const ast = parseFile(code, "test.tsx");
+		const map = {
+			"Welcome to our platform": "hero.welcome",
+		};
+		const result = transform(ast, map);
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain('getTranslations("hero")');
-    expect(result.code).toContain('t("welcome")');
-    expect(result.code).not.toContain('t("hero.');
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain('getTranslations("hero")');
+		expect(result.code).toContain('t("welcome")');
+		expect(result.code).not.toContain('t("hero.');
+	});
 
-  it("does NOT strip keys when t exists and keys have mixed namespaces", () => {
-    const code = `import { useTranslations } from "next-intl";
+	it("does NOT strip keys when t exists and keys have mixed namespaces", () => {
+		const code = `import { useTranslations } from "next-intl";
 "use client";
 function Hero() {
   const t = useTranslations();
   return <div><h1>Welcome to our platform</h1><button>Sign up now</button></div>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = {
-      "Welcome to our platform": "hero.welcome",
-      "Sign up now": "common.signUp",
-    };
-    const result = transform(ast, map);
+		const ast = parseFile(code, "test.tsx");
+		const map = {
+			"Welcome to our platform": "hero.welcome",
+			"Sign up now": "common.signUp",
+		};
+		const result = transform(ast, map);
 
-    expect(result.modified).toBe(true);
-    // Mixed namespaces → no namespace assigned → keys stay full
-    expect(result.code).toContain('t("hero.welcome")');
-    expect(result.code).toContain('t("common.signUp")');
-    expect(result.code).toContain("useTranslations()");
-  });
+		expect(result.modified).toBe(true);
+		// Mixed namespaces → no namespace assigned → keys stay full
+		expect(result.code).toContain('t("hero.welcome")');
+		expect(result.code).toContain('t("common.signUp")');
+		expect(result.code).toContain("useTranslations()");
+	});
 });
 
 describe("codegen transform (inline client boundary repairs)", () => {
-  const inlineOpts: TransformOptions = {
-    mode: "inline",
-    componentPath: "@/components/t",
-  };
+	const inlineOpts: TransformOptions = {
+		mode: "inline",
+		componentPath: "@/components/t",
+	};
 
-  it("rewrites t-server imports to client inline runtime when forceClient is true", () => {
-    const code = `import { T, createT } from "@/components/t-server";
+	it("rewrites t-server imports to client inline runtime when forceClient is true", () => {
+		const code = `import { T, createT } from "@/components/t-server";
 export function Logo() {
   const t = createT();
   return <img alt={t("Mimir Logo", "common.mimirLogo")} />;
 }`;
-    const ast = parseFile(code, "logo.tsx");
-    const result = transform(ast, {}, { ...inlineOpts, forceClient: true });
+		const ast = parseFile(code, "logo.tsx");
+		const result = transform(ast, {}, { ...inlineOpts, forceClient: true });
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain('from "@/components/t"');
-    expect(result.code).not.toContain("t-server");
-    expect(result.code).toContain("useT");
-    expect(result.code).toContain('"use client"');
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain('from "@/components/t"');
+		expect(result.code).not.toContain("t-server");
+		expect(result.code).toContain("useT");
+		expect(result.code).toContain('"use client"');
+	});
 
-  it("adds 'use client' when forceClient injects useT into fresh file", () => {
-    const code = `export function Logo() { return <img alt="Mimir Logo" />; }`;
-    const ast = parseFile(code, "logo.tsx");
-    const result = transform(
-      ast,
-      { "Mimir Logo": "common.mimirLogo" },
-      { ...inlineOpts, forceClient: true },
-    );
+	it("adds 'use client' when forceClient injects useT into fresh file", () => {
+		const code = `export function Logo() { return <img alt="Mimir Logo" />; }`;
+		const ast = parseFile(code, "logo.tsx");
+		const result = transform(
+			ast,
+			{ "Mimir Logo": "common.mimirLogo" },
+			{ ...inlineOpts, forceClient: true },
+		);
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain('"use client"');
-    expect(result.code).toContain("useT");
-    expect(result.code).toContain('from "@/components/t"');
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain('"use client"');
+		expect(result.code).toContain("useT");
+		expect(result.code).toContain('from "@/components/t"');
+	});
 
-  it("repairs useT() → createT() in server component body", () => {
-    const code = `import { T, useT } from "@/components/t";
+	it("repairs useT() → createT() in server component body", () => {
+		const code = `import { T, useT } from "@/components/t";
 export default function Logo() {
   const t = useT();
   return <img alt={t("Mimir Logo", "common.mimirLogo")} />;
 }`;
-    const ast = parseFile(code, "logo.tsx");
-    const result = transform(ast, {}, inlineOpts);
+		const ast = parseFile(code, "logo.tsx");
+		const result = transform(ast, {}, inlineOpts);
 
-    expect(result.modified).toBe(true);
-    // Server file (no "use client") → should use createT, not useT
-    expect(result.code).toContain("createT()");
-    expect(result.code).not.toMatch(/\buseT\(\)/);
-    expect(result.code).toContain("t-server");
-  });
+		expect(result.modified).toBe(true);
+		// Server file (no "use client") → should use createT, not useT
+		expect(result.code).toContain("createT()");
+		expect(result.code).not.toMatch(/\buseT\(\)/);
+		expect(result.code).toContain("t-server");
+	});
 
-  it("repairs createT() → useT() in client component body", () => {
-    const code = `"use client";
+	it("repairs createT() → useT() in client component body", () => {
+		const code = `"use client";
 import { T, createT } from "@/components/t-server";
 export default function Logo() {
   const t = createT();
   return <img alt={t("Mimir Logo", "common.mimirLogo")} />;
 }`;
-    const ast = parseFile(code, "logo.tsx");
-    const result = transform(ast, {}, inlineOpts);
+		const ast = parseFile(code, "logo.tsx");
+		const result = transform(ast, {}, inlineOpts);
 
-    expect(result.modified).toBe(true);
-    // Client file → should use useT, not createT
-    expect(result.code).toContain("useT()");
-    expect(result.code).not.toMatch(/\bcreateT\(\)/);
-    expect(result.code).toContain('from "@/components/t"');
-  });
+		expect(result.modified).toBe(true);
+		// Client file → should use useT, not createT
+		expect(result.code).toContain("useT()");
+		expect(result.code).not.toMatch(/\bcreateT\(\)/);
+		expect(result.code).toContain('from "@/components/t"');
+	});
 });
 
 describe("AST validation post-codegen", () => {
-  it("valid transformed code can be re-parsed (keys mode)", () => {
-    const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
-    const ast = parseFile(code, "before.tsx");
-    const result = transform(ast, textToKey);
+	it("valid transformed code can be re-parsed (keys mode)", () => {
+		const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
+		const ast = parseFile(code, "before.tsx");
+		const result = transform(ast, textToKey);
 
-    expect(result.modified).toBe(true);
-    expect(() => parseFile(result.code, "before.tsx")).not.toThrow();
-  });
+		expect(result.modified).toBe(true);
+		expect(() => parseFile(result.code, "before.tsx")).not.toThrow();
+	});
 
-  it("valid inline transformed code can be re-parsed", () => {
-    const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
-    const ast = parseFile(code, "before.tsx");
-    const inlineOpts: TransformOptions = {
-      mode: "inline",
-      componentPath: "@/components/t",
-    };
-    const result = transform(ast, textToKey, inlineOpts);
+	it("valid inline transformed code can be re-parsed", () => {
+		const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
+		const ast = parseFile(code, "before.tsx");
+		const inlineOpts: TransformOptions = {
+			mode: "inline",
+			componentPath: "@/components/t",
+		};
+		const result = transform(ast, textToKey, inlineOpts);
 
-    expect(result.modified).toBe(true);
-    expect(() => parseFile(result.code, "before.tsx")).not.toThrow();
-  });
+		expect(result.modified).toBe(true);
+		expect(() => parseFile(result.code, "before.tsx")).not.toThrow();
+	});
 
-  it("all fixture transforms produce parseable output", () => {
-    const fixtures = [
-      { file: "before.tsx", opts: undefined },
-      {
-        file: "before.tsx",
-        opts: { mode: "inline" as const, componentPath: "@/components/t" },
-      },
-    ];
+	it("all fixture transforms produce parseable output", () => {
+		const fixtures = [
+			{ file: "before.tsx", opts: undefined },
+			{
+				file: "before.tsx",
+				opts: { mode: "inline" as const, componentPath: "@/components/t" },
+			},
+		];
 
-    for (const fixture of fixtures) {
-      const code = readFileSync(join(fixturesDir, fixture.file), "utf-8");
-      const ast = parseFile(code, fixture.file);
-      const result = transform(ast, textToKey, fixture.opts);
+		for (const fixture of fixtures) {
+			const code = readFileSync(join(fixturesDir, fixture.file), "utf-8");
+			const ast = parseFile(code, fixture.file);
+			const result = transform(ast, textToKey, fixture.opts);
 
-      if (result.modified) {
-        expect(() => parseFile(result.code, fixture.file)).not.toThrow();
-      }
-    }
-  });
+			if (result.modified) {
+				expect(() => parseFile(result.code, fixture.file)).not.toThrow();
+			}
+		}
+	});
 });
 
 describe("codegen transform (duplicate const t edge cases)", () => {
-  it("does not create duplicate const t when user code has const t = {} (keys mode, client)", () => {
-    const code = `"use client";
+	it("does not create duplicate const t when user code has const t = {} (keys mode, client)", () => {
+		const code = `"use client";
 export default function Widget() {
   const t = {};
   return <h1>Hello World</h1>;
 }`;
-    const ast = parseFile(code, "widget.tsx");
-    const result = transform(ast, { "Hello World": "widget.hello" });
+		const ast = parseFile(code, "widget.tsx");
+		const result = transform(ast, { "Hello World": "widget.hello" });
 
-    expect(result.modified).toBe(true);
-    // Should NOT have duplicate const t declarations
-    const tMatches = result.code.match(/const t\s*=/g);
-    expect(tMatches?.length).toBe(1);
-  });
+		expect(result.modified).toBe(true);
+		// Should NOT have duplicate const t declarations
+		const tMatches = result.code.match(/const t\s*=/g);
+		expect(tMatches?.length).toBe(1);
+	});
 
-  it("does not create duplicate const t when user code has const t = {} (keys mode, server)", () => {
-    const code = `export default function Widget() {
+	it("does not create duplicate const t when user code has const t = {} (keys mode, server)", () => {
+		const code = `export default function Widget() {
   const t = {};
   return <h1>Hello World</h1>;
 }`;
-    const ast = parseFile(code, "widget.tsx");
-    const result = transform(ast, { "Hello World": "widget.hello" });
+		const ast = parseFile(code, "widget.tsx");
+		const result = transform(ast, { "Hello World": "widget.hello" });
 
-    expect(result.modified).toBe(true);
-    const tMatches = result.code.match(/const t\s*=/g);
-    expect(tMatches?.length).toBe(1);
-  });
+		expect(result.modified).toBe(true);
+		const tMatches = result.code.match(/const t\s*=/g);
+		expect(tMatches?.length).toBe(1);
+	});
 
-  it("does not create duplicate const t when user code has const t = otherFunc() (inline mode)", () => {
-    const code = `"use client";
+	it("does not create duplicate const t when user code has const t = otherFunc() (inline mode)", () => {
+		const code = `"use client";
 export function Widget() {
   const t = useCustomTranslation();
   return <h1>Hello World</h1>;
 }`;
-    const ast = parseFile(code, "widget.tsx");
-    const inlineOpts: TransformOptions = {
-      mode: "inline",
-      componentPath: "@/components/t",
-    };
-    const result = transform(ast, { "Hello World": "widget.hello" }, inlineOpts);
+		const ast = parseFile(code, "widget.tsx");
+		const inlineOpts: TransformOptions = {
+			mode: "inline",
+			componentPath: "@/components/t",
+		};
+		const result = transform(
+			ast,
+			{ "Hello World": "widget.hello" },
+			inlineOpts,
+		);
 
-    expect(result.modified).toBe(true);
-    const tMatches = result.code.match(/const t\s*=/g);
-    expect(tMatches?.length).toBe(1);
-  });
+		expect(result.modified).toBe(true);
+		const tMatches = result.code.match(/const t\s*=/g);
+		expect(tMatches?.length).toBe(1);
+	});
 });
 
 describe("codegen transform (updateCallNamespace preserves dynamic args)", () => {
-  it("does not overwrite dynamic namespace variable in useTranslations", () => {
-    const code = `"use client";
+	it("does not overwrite dynamic namespace variable in useTranslations", () => {
+		const code = `"use client";
 import { useTranslations } from "next-intl";
 export default function Widget() {
   const t = useTranslations(dynamicNs);
   return <h1>{t("hello")}</h1>;
 }`;
-    const ast = parseFile(code, "widget.tsx");
-    const result = transform(ast, { Hello: "widget.hello" });
+		const ast = parseFile(code, "widget.tsx");
+		const result = transform(ast, { Hello: "widget.hello" });
 
-    // dynamicNs should be preserved, not overwritten with "widget"
-    expect(result.code).toContain("dynamicNs");
-    expect(result.code).not.toContain('"widget"');
-  });
+		// dynamicNs should be preserved, not overwritten with "widget"
+		expect(result.code).toContain("dynamicNs");
+		expect(result.code).not.toContain('"widget"');
+	});
 });
 
 describe("codegen transform (arrow expression body edge cases)", () => {
-  it("converts arrow expression body to block and injects useTranslations (client, keys mode)", () => {
-    const code = `"use client";\nconst Page = () => <h1>Welcome to our platform</h1>;`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, { "Welcome to our platform": "hero.welcome" });
+	it("converts arrow expression body to block and injects useTranslations (client, keys mode)", () => {
+		const code = `"use client";\nconst Page = () => <h1>Welcome to our platform</h1>;`;
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, {
+			"Welcome to our platform": "hero.welcome",
+		});
 
-    expect(result.modified).toBe(true);
-    expect(result.stringsWrapped).toBe(1);
-    expect(result.code).toContain('useTranslations("hero")');
-    expect(result.code).toContain('t("welcome")');
-    // Should have been converted to block body with return
-    expect(result.code).toContain("return");
-  });
+		expect(result.modified).toBe(true);
+		expect(result.stringsWrapped).toBe(1);
+		expect(result.code).toContain('useTranslations("hero")');
+		expect(result.code).toContain('t("welcome")');
+		// Should have been converted to block body with return
+		expect(result.code).toContain("return");
+	});
 
-  it("converts arrow expression body to block and injects getTranslations (server, keys mode)", () => {
-    const code = `const Page = () => <h1>Welcome to our platform</h1>;`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, { "Welcome to our platform": "hero.welcome" });
+	it("converts arrow expression body to block and injects getTranslations (server, keys mode)", () => {
+		const code = `const Page = () => <h1>Welcome to our platform</h1>;`;
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(ast, {
+			"Welcome to our platform": "hero.welcome",
+		});
 
-    expect(result.modified).toBe(true);
-    expect(result.stringsWrapped).toBe(1);
-    expect(result.code).toContain('getTranslations("hero")');
-    expect(result.code).toContain('t("welcome")');
-    expect(result.code).toContain("async");
-    expect(result.code).toContain("return");
-  });
+		expect(result.modified).toBe(true);
+		expect(result.stringsWrapped).toBe(1);
+		expect(result.code).toContain('getTranslations("hero")');
+		expect(result.code).toContain('t("welcome")');
+		expect(result.code).toContain("async");
+		expect(result.code).toContain("return");
+	});
 
-  it("converts arrow expression body to block and injects hook (inline mode)", () => {
-    const inlineOpts: TransformOptions = {
-      mode: "inline",
-      componentPath: "@/components/t",
-    };
-    const code = `const Page = () => <input placeholder="Search..." />;`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, { "Search...": "common.searchPlaceholder" }, inlineOpts);
+	it("converts arrow expression body to block and injects hook (inline mode)", () => {
+		const inlineOpts: TransformOptions = {
+			mode: "inline",
+			componentPath: "@/components/t",
+		};
+		const code = `const Page = () => <input placeholder="Search..." />;`;
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(
+			ast,
+			{ "Search...": "common.searchPlaceholder" },
+			inlineOpts,
+		);
 
-    expect(result.modified).toBe(true);
-    expect(result.stringsWrapped).toBe(1);
-    expect(result.code).toContain("createT()");
-    expect(result.code).toContain("return");
-  });
+		expect(result.modified).toBe(true);
+		expect(result.stringsWrapped).toBe(1);
+		expect(result.code).toContain("createT()");
+		expect(result.code).toContain("return");
+	});
 });
 
 describe("codegen transform (dynamic namespace does not strip keys)", () => {
-  it("preserves fully qualified keys when useTranslations has dynamic arg", () => {
-    const code = `"use client";
+	it("preserves fully qualified keys when useTranslations has dynamic arg", () => {
+		const code = `"use client";
 import { useTranslations } from "next-intl";
 export default function Widget() {
   const t = useTranslations(dynamicNs);
   return <div><h1>Welcome to our platform</h1><p>Get started with your journey today</p></div>;
 }`;
-    const ast = parseFile(code, "widget.tsx");
-    const result = transform(ast, {
-      "Welcome to our platform": "hero.welcome",
-      "Get started with your journey today": "hero.getStarted",
-    });
+		const ast = parseFile(code, "widget.tsx");
+		const result = transform(ast, {
+			"Welcome to our platform": "hero.welcome",
+			"Get started with your journey today": "hero.getStarted",
+		});
 
-    expect(result.modified).toBe(true);
-    // Dynamic arg → keys should NOT be stripped
-    expect(result.code).toContain('t("hero.welcome")');
-    expect(result.code).toContain('t("hero.getStarted")');
-    // Dynamic arg preserved
-    expect(result.code).toContain("dynamicNs");
-  });
+		expect(result.modified).toBe(true);
+		// Dynamic arg → keys should NOT be stripped
+		expect(result.code).toContain('t("hero.welcome")');
+		expect(result.code).toContain('t("hero.getStarted")');
+		// Dynamic arg preserved
+		expect(result.code).toContain("dynamicNs");
+	});
 });
 
 describe("detectNamespace", () => {
-  it("returns namespace when all keys share the same prefix", () => {
-    expect(detectNamespace(["hero.welcome", "hero.title"])).toBe("hero");
-  });
+	it("returns namespace when all keys share the same prefix", () => {
+		expect(detectNamespace(["hero.welcome", "hero.title"])).toBe("hero");
+	});
 
-  it("returns null when keys have mixed prefixes", () => {
-    expect(detectNamespace(["hero.welcome", "common.signUp"])).toBeNull();
-  });
+	it("returns null when keys have mixed prefixes", () => {
+		expect(detectNamespace(["hero.welcome", "common.signUp"])).toBeNull();
+	});
 
-  it("returns null for empty keys array", () => {
-    expect(detectNamespace([])).toBeNull();
-  });
+	it("returns null for empty keys array", () => {
+		expect(detectNamespace([])).toBeNull();
+	});
 
-  it("returns null when any key has no dot", () => {
-    expect(detectNamespace(["greeting", "hero.welcome"])).toBeNull();
-  });
+	it("returns null when any key has no dot", () => {
+		expect(detectNamespace(["greeting", "hero.welcome"])).toBeNull();
+	});
 
-  it("returns null when all keys have no dot", () => {
-    expect(detectNamespace(["greeting", "welcome"])).toBeNull();
-  });
+	it("returns null when all keys have no dot", () => {
+		expect(detectNamespace(["greeting", "welcome"])).toBeNull();
+	});
 
-  it("returns namespace for single key with dot", () => {
-    expect(detectNamespace(["hero.welcome"])).toBe("hero");
-  });
+	it("returns namespace for single key with dot", () => {
+		expect(detectNamespace(["hero.welcome"])).toBe("hero");
+	});
 
-  it("returns first segment for deeply nested keys", () => {
-    expect(
-      detectNamespace(["settings.profile.title", "settings.profile.name"]),
-    ).toBe("settings");
-  });
+	it("returns first segment for deeply nested keys", () => {
+		expect(
+			detectNamespace(["settings.profile.title", "settings.profile.name"]),
+		).toBe("settings");
+	});
 
-  it("returns null for single key without dot", () => {
-    expect(detectNamespace(["greeting"])).toBeNull();
-  });
+	it("returns null for single key without dot", () => {
+		expect(detectNamespace(["greeting"])).toBeNull();
+	});
 });
 
 describe("codegen transform (module factory, keys mode)", () => {
-  it("converts module-level const to factory with t() calls", () => {
-    const code = `export const footerLinks = [
+	it("converts module-level const to factory with t() calls", () => {
+		const code = `export const footerLinks = [
   { title: "About", href: "/about" },
   { title: "Contact", href: "/contact" },
 ];`;
-    const ast = parseFile(code, "test.tsx");
-    const map = {
-      About: "footer.about",
-      Contact: "footer.contact",
-    };
-    const result = transform(ast, map, {
-      moduleFactoryConstNames: ["footerLinks"],
-    });
+		const ast = parseFile(code, "test.tsx");
+		const map = {
+			About: "footer.about",
+			Contact: "footer.contact",
+		};
+		const result = transform(ast, map, {
+			moduleFactoryConstNames: ["footerLinks"],
+			isTypeScript: true,
+		});
 
-    expect(result.stringsWrapped).toBe(2);
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain("t(");
-    // Should be wrapped as arrow factory
-    expect(result.code).toContain("t: any) =>");
-  });
+		expect(result.stringsWrapped).toBe(2);
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain("t(");
+		// Should be wrapped as arrow factory
+		expect(result.code).toContain("t: any) =>");
+	});
 
-  it("converts module-level const to factory in inline mode", () => {
-    const code = `export const footerLinks = [
+	it("converts module-level const to factory in inline mode", () => {
+		const code = `export const footerLinks = [
   { title: "About", href: "/about" },
 ];`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { About: "footer.about" };
-    const result = transform(ast, map, {
-      mode: "inline",
-      componentPath: "@/components/t",
-      moduleFactoryConstNames: ["footerLinks"],
-    });
+		const ast = parseFile(code, "test.tsx");
+		const map = { About: "footer.about" };
+		const result = transform(ast, map, {
+			mode: "inline",
+			componentPath: "@/components/t",
+			moduleFactoryConstNames: ["footerLinks"],
+			isTypeScript: true,
+		});
 
-    expect(result.stringsWrapped).toBe(1);
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain('t("About", "footer.about")');
-    expect(result.code).toContain("t: any) =>");
-  });
+		expect(result.stringsWrapped).toBe(1);
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain('t("About", "footer.about")');
+		expect(result.code).toContain("t: any) =>");
+	});
 
-  it("does not transform if not in moduleFactoryConstNames", () => {
-    const code = `export const metadata = {
+	it("does not transform if not in moduleFactoryConstNames", () => {
+		const code = `export const metadata = {
   title: "My App",
   description: "A great application.",
 };`;
-    const ast = parseFile(code, "test.tsx");
-    const map = {
-      "My App": "meta.title",
-      "A great application.": "meta.description",
-    };
-    const result = transform(ast, map, {
-      moduleFactoryConstNames: ["otherConst"],
-    });
+		const ast = parseFile(code, "test.tsx");
+		const map = {
+			"My App": "meta.title",
+			"A great application.": "meta.description",
+		};
+		const result = transform(ast, map, {
+			moduleFactoryConstNames: ["otherConst"],
+		});
 
-    expect(result.stringsWrapped).toBe(0);
-    expect(result.modified).toBe(false);
-  });
+		expect(result.stringsWrapped).toBe(0);
+		expect(result.modified).toBe(false);
+	});
 
-  it("rewrites imported factory references with correct translatorId", () => {
-    const code = `"use client";
+	it("rewrites imported factory references with correct translatorId", () => {
+		const code = `"use client";
 import { useTranslations } from "next-intl";
 import { footerLinks } from "./data";
 export function Footer() {
   const t = useTranslations("footer");
   return <ul>{footerLinks.map(l => <li key={l.href}>{l.title}</li>)}</ul>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, {}, {
-      moduleFactoryImportedNames: ["footerLinks"],
-    });
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(
+			ast,
+			{},
+			{
+				moduleFactoryImportedNames: ["footerLinks"],
+			},
+		);
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain("footerLinks(t)");
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain("footerLinks(t)");
+	});
 
-  it("uses fallback translatorId when component has const t conflict", () => {
-    const code = `"use client";
+	it("uses fallback translatorId when component has const t conflict", () => {
+		const code = `"use client";
 import { footerLinks } from "./data";
 export function Footer() {
   const t = {};
   return <ul>{footerLinks.map(l => <li key={l.href}>Hello</li>)}</ul>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { Hello: "footer.hello" };
-    const result = transform(ast, map, {
-      moduleFactoryImportedNames: ["footerLinks"],
-    });
+		const ast = parseFile(code, "test.tsx");
+		const map = { Hello: "footer.hello" };
+		const result = transform(ast, map, {
+			moduleFactoryImportedNames: ["footerLinks"],
+		});
 
-    expect(result.modified).toBe(true);
-    // Component gets __tk_t due to conflict
-    expect(result.code).toContain("__tk_t");
-    expect(result.code).toContain("footerLinks(__tk_t)");
-  });
+		expect(result.modified).toBe(true);
+		// Component gets __tk_t due to conflict
+		expect(result.code).toContain("__tk_t");
+		expect(result.code).toContain("footerLinks(__tk_t)");
+	});
 
-  it("rewrites shorthand { FOO } to { FOO: FOO(t) }", () => {
-    const code = `"use client";
+	it("rewrites shorthand { FOO } to { FOO: FOO(t) }", () => {
+		const code = `"use client";
 import { useTranslations } from "next-intl";
 import { navItems } from "./data";
 export function Nav() {
   const t = useTranslations();
   return <div data={JSON.stringify({ navItems })} />;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, {}, {
-      moduleFactoryImportedNames: ["navItems"],
-    });
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(
+			ast,
+			{},
+			{
+				moduleFactoryImportedNames: ["navItems"],
+			},
+		);
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain("navItems: navItems(t)");
-    // Shorthand should be expanded — no shorthand in JSON.stringify arg
-    expect(result.code).toMatch(/JSON\.stringify\(\{[\s\S]*navItems:\s*navItems\(t\)/);
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain("navItems: navItems(t)");
+		// Shorthand should be expanded — no shorthand in JSON.stringify arg
+		expect(result.code).toMatch(
+			/JSON\.stringify\(\{[\s\S]*navItems:\s*navItems\(t\)/,
+		);
+	});
 
-  it("is idempotent - second run does not produce changes on factory consts", () => {
-    const code = `export const footerLinks = t => ([
+	it("is idempotent - second run does not produce changes on factory consts", () => {
+		const code = `export const footerLinks = t => ([
   { title: t("footer.about"), href: "/about" },
 ]);`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { About: "footer.about" };
-    const result = transform(ast, map, {
-      moduleFactoryConstNames: ["footerLinks"],
-    });
+		const ast = parseFile(code, "test.tsx");
+		const map = { About: "footer.about" };
+		const result = transform(ast, map, {
+			moduleFactoryConstNames: ["footerLinks"],
+		});
 
-    // Already wrapped → no additional wrapping
-    expect(result.code).not.toContain("t: any) => ((t: any) =>");
-  });
+		// Already wrapped → no additional wrapping
+		expect(result.code).not.toContain("t: any) => ((t: any) =>");
+	});
 
-  it("is idempotent - second run does not double-call imported references", () => {
-    const code = `"use client";
+	it("is idempotent - second run does not double-call imported references", () => {
+		const code = `"use client";
 import { useTranslations } from "next-intl";
 import { footerLinks } from "./data";
 export function Footer() {
   const t = useTranslations();
   return <ul>{footerLinks(t).map(l => <li>{l.title}</li>)}</ul>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, {}, {
-      moduleFactoryImportedNames: ["footerLinks"],
-    });
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(
+			ast,
+			{},
+			{
+				moduleFactoryImportedNames: ["footerLinks"],
+			},
+		);
 
-    // Already called → should not double-wrap
-    expect(result.code).not.toContain("footerLinks(t)(t)");
-    expect(result.code).toContain("footerLinks(t)");
-  });
+		// Already called → should not double-wrap
+		expect(result.code).not.toContain("footerLinks(t)(t)");
+		expect(result.code).toContain("footerLinks(t)");
+	});
 
-  it("rewrites aliased import { FOO as BAR } → BAR(t)", () => {
-    const code = `"use client";
+	it("rewrites aliased import { FOO as BAR } → BAR(t)", () => {
+		const code = `"use client";
 import { useTranslations } from "next-intl";
 import { footerLinks as links } from "./data";
 export function Footer() {
   const t = useTranslations();
   return <ul>{links.map(l => <li>{l.title}</li>)}</ul>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, {}, {
-      moduleFactoryImportedNames: ["links"],
-    });
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(
+			ast,
+			{},
+			{
+				moduleFactoryImportedNames: ["links"],
+			},
+		);
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain("links(t)");
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain("links(t)");
+	});
 
-  it("disables namespace for components that use factory refs (avoids key mismatch)", () => {
-    const code = `"use client";
+	it("disables namespace for components that use factory refs (avoids key mismatch)", () => {
+		const code = `"use client";
 import { footerLinks } from "./data";
 export function Hero() {
   return <div><h1>Welcome</h1>{footerLinks.map(l => <a href={l.href}>{l.title}</a>)}</div>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { Welcome: "hero.welcome" };
-    const result = transform(ast, map, {
-      moduleFactoryImportedNames: ["footerLinks"],
-    });
+		const ast = parseFile(code, "test.tsx");
+		const map = { Welcome: "hero.welcome" };
+		const result = transform(ast, map, {
+			moduleFactoryImportedNames: ["footerLinks"],
+		});
 
-    expect(result.modified).toBe(true);
-    // Component uses factory refs → no namespace (factory uses full keys)
-    expect(result.code).toContain("useTranslations()");
-    expect(result.code).not.toContain('useTranslations("hero")');
-    // Keys stay as full keys since no namespace stripping
-    expect(result.code).toContain('t("hero.welcome")');
-    // Factory ref gets rewritten
-    expect(result.code).toContain("footerLinks(t)");
-  });
+		expect(result.modified).toBe(true);
+		// Component uses factory refs → no namespace (factory uses full keys)
+		expect(result.code).toContain("useTranslations()");
+		expect(result.code).not.toContain('useTranslations("hero")');
+		// Keys stay as full keys since no namespace stripping
+		expect(result.code).toContain('t("hero.welcome")');
+		// Factory ref gets rewritten
+		expect(result.code).toContain("footerLinks(t)");
+	});
 
-  it("injects t for import-only factory references (no own wrapped strings)", () => {
-    const code = `"use client";
+	it("injects t for import-only factory references (no own wrapped strings)", () => {
+		const code = `"use client";
 import { footerLinks } from "./data";
 export function Footer() {
   return <ul>{footerLinks.map(l => <li key={l.href}>{l.title}</li>)}</ul>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    // No textToKey entries for this component's own strings
-    const result = transform(ast, {}, {
-      moduleFactoryImportedNames: ["footerLinks"],
-    });
+		const ast = parseFile(code, "test.tsx");
+		// No textToKey entries for this component's own strings
+		const result = transform(
+			ast,
+			{},
+			{
+				moduleFactoryImportedNames: ["footerLinks"],
+			},
+		);
 
-    expect(result.modified).toBe(true);
-    // t must be injected even though there are no wrapped strings
-    expect(result.code).toContain("useTranslations");
-    expect(result.code).toMatch(/const t = useTranslations\(\)/);
-    expect(result.code).toContain("footerLinks(t)");
-  });
+		expect(result.modified).toBe(true);
+		// t must be injected even though there are no wrapped strings
+		expect(result.code).toContain("useTranslations");
+		expect(result.code).toMatch(/const t = useTranslations\(\)/);
+		expect(result.code).toContain("footerLinks(t)");
+	});
 
-  it("does not rewrite shadowed local variable with same name as factory import", () => {
-    const code = `"use client";
+	it("does not rewrite shadowed local variable with same name as factory import", () => {
+		const code = `"use client";
 import { useTranslations } from "next-intl";
 import { items } from "./data";
 export function List() {
@@ -1650,109 +1679,123 @@ export function List() {
   const items = [1, 2, 3];
   return <ul>{items.map(i => <li key={i}>{i}</li>)}</ul>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, {}, {
-      moduleFactoryImportedNames: ["items"],
-    });
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(
+			ast,
+			{},
+			{
+				moduleFactoryImportedNames: ["items"],
+			},
+		);
 
-    // The local `const items = [1,2,3]` shadows the import.
-    // Should NOT be rewritten to items(t).
-    expect(result.code).not.toContain("items(t)");
-  });
+		// The local `const items = [1,2,3]` shadows the import.
+		// Should NOT be rewritten to items(t).
+		expect(result.code).not.toContain("items(t)");
+	});
 
-  it("does not rewrite destructuring param with same name as factory import", () => {
-    const code = `"use client";
+	it("does not rewrite destructuring param with same name as factory import", () => {
+		const code = `"use client";
 import { useTranslations } from "next-intl";
 import { navItems } from "./data";
 export function Nav({ navItems }: { navItems: any[] }) {
   const t = useTranslations();
   return <ul>{navItems.map(i => <li>{i.title}</li>)}</ul>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, {}, {
-      moduleFactoryImportedNames: ["navItems"],
-    });
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(
+			ast,
+			{},
+			{
+				moduleFactoryImportedNames: ["navItems"],
+			},
+		);
 
-    // navItems is a destructured prop, not the import. Should not be rewritten.
-    expect(result.code).not.toContain("navItems(t)");
-  });
+		// navItems is a destructured prop, not the import. Should not be rewritten.
+		expect(result.code).not.toContain("navItems(t)");
+	});
 
-  it("wraps typed const (preserves type annotation as return type)", () => {
-    const code = `export const footerLinks: SidebarNavItem[] = [
+	it("wraps typed const (preserves type annotation as return type)", () => {
+		const code = `export const footerLinks: SidebarNavItem[] = [
   { title: "About", href: "/about" },
 ];`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { About: "footer.about" };
-    const result = transform(ast, map, {
-      moduleFactoryConstNames: ["footerLinks"],
-    });
+		const ast = parseFile(code, "test.tsx");
+		const map = { About: "footer.about" };
+		const result = transform(ast, map, {
+			moduleFactoryConstNames: ["footerLinks"],
+		});
 
-    expect(result.stringsWrapped).toBe(1);
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain("=>");
-    expect(result.code).toContain('t("footer.about")');
-    // Type annotation should be preserved as return type
-    expect(result.code).toContain("): SidebarNavItem[]");
-  });
+		expect(result.stringsWrapped).toBe(1);
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain("=>");
+		expect(result.code).toContain('t("footer.about")');
+		// Type annotation should be preserved as return type
+		expect(result.code).toContain("): SidebarNavItem[]");
+	});
 
-  it("does not rewrite factory ref used in function parameter default (t not in scope)", () => {
-    const code = `"use client";
+	it("does not rewrite factory ref used in function parameter default (t not in scope)", () => {
+		const code = `"use client";
 import { useTranslations } from "next-intl";
 import { defaultSearchState } from "./data";
 export function SearchDialog({ defaultState = defaultSearchState }: Props) {
   const t = useTranslations();
   return <div>{defaultState.query}</div>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, {}, {
-      moduleFactoryImportedNames: ["defaultSearchState"],
-    });
-    // Should NOT rewrite — t is not available in parameter defaults
-    expect(result.code).not.toContain("defaultSearchState(t)");
-  });
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(
+			ast,
+			{},
+			{
+				moduleFactoryImportedNames: ["defaultSearchState"],
+			},
+		);
+		// Should NOT rewrite — t is not available in parameter defaults
+		expect(result.code).not.toContain("defaultSearchState(t)");
+	});
 
-  it("does not inject useTranslations import for data-only factory file (no components)", () => {
-    // Bug fix: data files with only factory consts should NOT get a spurious
-    // import { useTranslations } from "next-intl"
-    const code = `export const siteConfig = {
+	it("does not inject useTranslations import for data-only factory file (no components)", () => {
+		// Bug fix: data files with only factory consts should NOT get a spurious
+		// import { useTranslations } from "next-intl"
+		const code = `export const siteConfig = {
   name: "MySite",
   description: "Unlock the power",
   url: "http://localhost:3000",
 };`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { "Unlock the power": "site.unlockPower" };
-    const result = transform(ast, map, {
-      moduleFactoryConstNames: ["siteConfig"],
-    });
+		const ast = parseFile(code, "test.tsx");
+		const map = { "Unlock the power": "site.unlockPower" };
+		const result = transform(ast, map, {
+			moduleFactoryConstNames: ["siteConfig"],
+			isTypeScript: true,
+		});
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain("t: any) =>");
-    expect(result.code).toContain('t("site.unlockPower")');
-    // Should NOT have useTranslations or getTranslations import
-    expect(result.code).not.toContain("useTranslations");
-    expect(result.code).not.toContain("getTranslations");
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain("t: any) =>");
+		expect(result.code).toContain('t("site.unlockPower")');
+		// Should NOT have useTranslations or getTranslations import
+		expect(result.code).not.toContain("useTranslations");
+		expect(result.code).not.toContain("getTranslations");
+	});
 
-  it("does not inject getTranslations import for server data-only factory file", () => {
-    // Same for server files (no "use client", no hooks)
-    const code = `export const links = [
+	it("does not inject getTranslations import for server data-only factory file", () => {
+		// Same for server files (no "use client", no hooks)
+		const code = `export const links = [
   { title: "About", href: "/about" },
 ];`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { About: "footer.about" };
-    const result = transform(ast, map, {
-      moduleFactoryConstNames: ["links"],
-    });
+		const ast = parseFile(code, "test.tsx");
+		const map = { About: "footer.about" };
+		const result = transform(ast, map, {
+			moduleFactoryConstNames: ["links"],
+			isTypeScript: true,
+		});
 
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain("t: any) =>");
-    // Should NOT have getTranslations import
-    expect(result.code).not.toContain("getTranslations");
-    expect(result.code).not.toContain("next-intl");
-  });
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain("t: any) =>");
+		// Should NOT have getTranslations import
+		expect(result.code).not.toContain("getTranslations");
+		expect(result.code).not.toContain("next-intl");
+	});
 
-  it("does not rewrite factory ref used in non-PascalCase helper function", () => {
-    const code = `"use client";
+	it("does not rewrite factory ref used in non-PascalCase helper function", () => {
+		const code = `"use client";
 import { useTranslations } from "next-intl";
 import { footerLinks } from "./data";
 function formatLinks(items: any[]) {
@@ -1763,19 +1806,23 @@ export function Footer() {
   const formatted = formatLinks(footerLinks);
   return <ul>{formatted.map(l => <li>{l.title}</li>)}</ul>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    const result = transform(ast, {}, {
-      moduleFactoryImportedNames: ["footerLinks"],
-    });
+		const ast = parseFile(code, "test.tsx");
+		const result = transform(
+			ast,
+			{},
+			{
+				moduleFactoryImportedNames: ["footerLinks"],
+			},
+		);
 
-    // footerLinks is used as argument to formatLinks (inside Footer, PascalCase)
-    // so it should still get rewritten, but only from within the PascalCase component
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain("footerLinks(t)");
-  });
+		// footerLinks is used as argument to formatLinks (inside Footer, PascalCase)
+		// so it should still get rewritten, but only from within the PascalCase component
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain("footerLinks(t)");
+	});
 
-  it("does not crash on TSQualifiedName (typeof factoryRef)", () => {
-    const code = `"use client";
+	it("does not crash on TSQualifiedName (typeof factoryRef)", () => {
+		const code = `"use client";
 import { useTranslations } from "next-intl";
 import { menuItems } from "./data";
 type Props = { items: typeof menuItems };
@@ -1783,103 +1830,139 @@ export function Menu({ items }: Props) {
   const t = useTranslations();
   return <ul>{items.map(i => <li>{i.title}</li>)}</ul>;
 }`;
-    const ast = parseFile(code, "test.tsx");
-    // Should not crash when menuItems appears in a TSQualifiedName / TSTypeQuery
-    expect(() =>
-      transform(ast, {}, { moduleFactoryImportedNames: ["menuItems"] }),
-    ).not.toThrow();
-    const result = transform(
-      parseFile(code, "test.tsx"),
-      {},
-      { moduleFactoryImportedNames: ["menuItems"] },
-    );
-    // The reference inside `typeof menuItems` must NOT be rewritten
-    expect(result.code).toContain("typeof menuItems");
-  });
+		const ast = parseFile(code, "test.tsx");
+		// Should not crash when menuItems appears in a TSQualifiedName / TSTypeQuery
+		expect(() =>
+			transform(ast, {}, { moduleFactoryImportedNames: ["menuItems"] }),
+		).not.toThrow();
+		const result = transform(
+			parseFile(code, "test.tsx"),
+			{},
+			{ moduleFactoryImportedNames: ["menuItems"] },
+		);
+		// The reference inside `typeof menuItems` must NOT be rewritten
+		expect(result.code).toContain("typeof menuItems");
+	});
+
+	it("does NOT inject type annotation (t: any) in JS files", () => {
+		const code = `export const footerLinks = [
+  { title: "About", href: "/about" },
+];`;
+		const ast = parseFile(code, "test.js");
+		const map = { About: "footer.about" };
+		const result = transform(ast, map, {
+			moduleFactoryConstNames: ["footerLinks"],
+			isTypeScript: false,
+		});
+
+		expect(result.stringsWrapped).toBe(1);
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain("t(");
+		// Must NOT contain TS type annotation in JS output
+		expect(result.code).not.toContain("t: any");
+		// Should still wrap as arrow factory (Babel omits parens for single untyped param)
+		expect(result.code).toContain("t =>");
+	});
+
+	it("injects type annotation (t: any) in TS files", () => {
+		const code = `export const footerLinks = [
+  { title: "About", href: "/about" },
+];`;
+		const ast = parseFile(code, "test.tsx");
+		const map = { About: "footer.about" };
+		const result = transform(ast, map, {
+			moduleFactoryConstNames: ["footerLinks"],
+			isTypeScript: true,
+		});
+
+		expect(result.stringsWrapped).toBe(1);
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain("t: any) =>");
+	});
 });
 
 describe("codegen transform (anonymous arrow / non-component scope)", () => {
-  it("does NOT wrap strings in anonymous arrow functions inside objects", () => {
-    const code = `export const icons = {
+	it("does NOT wrap strings in anonymous arrow functions inside objects", () => {
+		const code = `export const icons = {
   logo: ({ size }: { size: number }) => <Image alt="Numa365 logo" width={size} />,
 };`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { "Numa365 logo": "icons.logo" };
-    const result = transform(ast, map);
+		const ast = parseFile(code, "test.tsx");
+		const map = { "Numa365 logo": "icons.logo" };
+		const result = transform(ast, map);
 
-    // Anonymous arrow inside object → no PascalCase component → must NOT wrap
-    expect(result.stringsWrapped).toBe(0);
-    expect(result.modified).toBe(false);
-    expect(result.code).toContain('alt="Numa365 logo"');
-  });
+		// Anonymous arrow inside object → no PascalCase component → must NOT wrap
+		expect(result.stringsWrapped).toBe(0);
+		expect(result.modified).toBe(false);
+		expect(result.code).toContain('alt="Numa365 logo"');
+	});
 
-  it("wraps JSXText inside a PascalCase component", () => {
-    const code = `function Hero() { return <h1>Welcome to our platform</h1>; }`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { "Welcome to our platform": "hero.welcome" };
-    const result = transform(ast, map);
+	it("wraps JSXText inside a PascalCase component", () => {
+		const code = `function Hero() { return <h1>Welcome to our platform</h1>; }`;
+		const ast = parseFile(code, "test.tsx");
+		const map = { "Welcome to our platform": "hero.welcome" };
+		const result = transform(ast, map);
 
-    expect(result.stringsWrapped).toBe(1);
-    expect(result.modified).toBe(true);
-    expect(result.code).toContain('t("welcome")');
-  });
+		expect(result.stringsWrapped).toBe(1);
+		expect(result.modified).toBe(true);
+		expect(result.code).toContain('t("welcome")');
+	});
 
-  it("does NOT wrap JSXAttribute in anonymous arrow functions inside objects", () => {
-    const code = `export const cards = {
+	it("does NOT wrap JSXAttribute in anonymous arrow functions inside objects", () => {
+		const code = `export const cards = {
   hero: ({ title }: { title: string }) => <Card title="Featured product" />,
 };`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { "Featured product": "cards.featured" };
-    const result = transform(ast, map);
+		const ast = parseFile(code, "test.tsx");
+		const map = { "Featured product": "cards.featured" };
+		const result = transform(ast, map);
 
-    expect(result.stringsWrapped).toBe(0);
-    expect(result.modified).toBe(false);
-    expect(result.code).toContain('title="Featured product"');
-  });
+		expect(result.stringsWrapped).toBe(0);
+		expect(result.modified).toBe(false);
+		expect(result.code).toContain('title="Featured product"');
+	});
 
-  it("does NOT wrap JSXExpressionContainer in anonymous arrow functions", () => {
-    const code = `export const renderers = {
+	it("does NOT wrap JSXExpressionContainer in anonymous arrow functions", () => {
+		const code = `export const renderers = {
   greeting: ({ name }: { name: string }) => <p>{\`Hello \${name}\`}</p>,
 };`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { "Hello {name}": "renderers.hello" };
-    const result = transform(ast, map);
+		const ast = parseFile(code, "test.tsx");
+		const map = { "Hello {name}": "renderers.hello" };
+		const result = transform(ast, map);
 
-    expect(result.stringsWrapped).toBe(0);
-    expect(result.modified).toBe(false);
-  });
+		expect(result.stringsWrapped).toBe(0);
+		expect(result.modified).toBe(false);
+	});
 
-  it("does NOT wrap JSXAttribute in anonymous arrows (inline mode)", () => {
-    const inlineOpts: TransformOptions = {
-      mode: "inline",
-      componentPath: "@/components/t",
-    };
-    const code = `export const icons = {
+	it("does NOT wrap JSXAttribute in anonymous arrows (inline mode)", () => {
+		const inlineOpts: TransformOptions = {
+			mode: "inline",
+			componentPath: "@/components/t",
+		};
+		const code = `export const icons = {
   logo: ({ size }: { size: number }) => <Image alt="Numa365 logo" width={size} />,
 };`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { "Numa365 logo": "icons.logo" };
-    const result = transform(ast, map, inlineOpts);
+		const ast = parseFile(code, "test.tsx");
+		const map = { "Numa365 logo": "icons.logo" };
+		const result = transform(ast, map, inlineOpts);
 
-    expect(result.stringsWrapped).toBe(0);
-    expect(result.modified).toBe(false);
-    expect(result.code).toContain('alt="Numa365 logo"');
-  });
+		expect(result.stringsWrapped).toBe(0);
+		expect(result.modified).toBe(false);
+		expect(result.code).toContain('alt="Numa365 logo"');
+	});
 
-  it("does NOT wrap JSXText in anonymous arrows (inline mode)", () => {
-    const inlineOpts: TransformOptions = {
-      mode: "inline",
-      componentPath: "@/components/t",
-    };
-    const code = `export const renderers = {
+	it("does NOT wrap JSXText in anonymous arrows (inline mode)", () => {
+		const inlineOpts: TransformOptions = {
+			mode: "inline",
+			componentPath: "@/components/t",
+		};
+		const code = `export const renderers = {
   hero: () => <h1>Welcome</h1>,
 };`;
-    const ast = parseFile(code, "test.tsx");
-    const map = { Welcome: "hero.welcome" };
-    const result = transform(ast, map, inlineOpts);
+		const ast = parseFile(code, "test.tsx");
+		const map = { Welcome: "hero.welcome" };
+		const result = transform(ast, map, inlineOpts);
 
-    expect(result.stringsWrapped).toBe(0);
-    expect(result.modified).toBe(false);
-    expect(result.code).toContain(">Welcome<");
-  });
+		expect(result.stringsWrapped).toBe(0);
+		expect(result.modified).toBe(false);
+		expect(result.code).toContain(">Welcome<");
+	});
 });

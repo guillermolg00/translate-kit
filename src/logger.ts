@@ -2,104 +2,104 @@ import pc from "picocolors";
 import type { TranslationResult } from "./types.js";
 
 export function logStart(sourceLocale: string, targetLocales: string[]): void {
-  console.log(
-    `\n${pc.bold("translate-kit")} ${pc.dim("·")} ${sourceLocale} ${pc.dim("→")} ${targetLocales.join(", ")}\n`,
-  );
+	console.log(
+		`\n${pc.bold("translate-kit")} ${pc.dim("·")} ${sourceLocale} ${pc.dim("→")} ${targetLocales.join(", ")}\n`,
+	);
 }
 
 export function logLocaleStart(locale: string): void {
-  console.log(`${pc.cyan("●")} ${pc.bold(locale)}`);
+	console.log(`${pc.cyan("●")} ${pc.bold(locale)}`);
 }
 
 export function logLocaleResult(result: TranslationResult): void {
-  const parts: string[] = [];
+	const parts: string[] = [];
 
-  if (result.translated > 0) {
-    parts.push(pc.green(`${result.translated} translated`));
-  }
-  if (result.cached > 0) {
-    parts.push(pc.dim(`${result.cached} cached`));
-  }
-  if (result.removed > 0) {
-    parts.push(pc.yellow(`${result.removed} removed`));
-  }
-  if (result.errors > 0) {
-    parts.push(pc.red(`${result.errors} errors`));
-  }
+	if (result.translated > 0) {
+		parts.push(pc.green(`${result.translated} translated`));
+	}
+	if (result.cached > 0) {
+		parts.push(pc.dim(`${result.cached} cached`));
+	}
+	if (result.removed > 0) {
+		parts.push(pc.yellow(`${result.removed} removed`));
+	}
+	if (result.errors > 0) {
+		parts.push(pc.red(`${result.errors} errors`));
+	}
 
-  const time = pc.dim(`${(result.duration / 1000).toFixed(1)}s`);
-  console.log(`  ${parts.join(pc.dim(" · "))} ${time}`);
+	const time = pc.dim(`${(result.duration / 1000).toFixed(1)}s`);
+	console.log(`  ${parts.join(pc.dim(" · "))} ${time}`);
 }
 
 export function logSummary(results: TranslationResult[]): void {
-  const totalTranslated = results.reduce((s, r) => s + r.translated, 0);
-  const totalCached = results.reduce((s, r) => s + r.cached, 0);
-  const totalDuration = results.reduce((s, r) => s + r.duration, 0);
+	const totalTranslated = results.reduce((s, r) => s + r.translated, 0);
+	const totalCached = results.reduce((s, r) => s + r.cached, 0);
+	const totalDuration = results.reduce((s, r) => s + r.duration, 0);
 
-  console.log(
-    `\n${pc.bold("Done!")} ${totalTranslated} keys translated, ${totalCached} cached ${pc.dim(`(${(totalDuration / 1000).toFixed(1)}s)`)}\n`,
-  );
+	console.log(
+		`\n${pc.bold("Done!")} ${totalTranslated} keys translated, ${totalCached} cached ${pc.dim(`(${(totalDuration / 1000).toFixed(1)}s)`)}\n`,
+	);
 }
 
 export function logDryRun(
-  locale: string,
-  added: number,
-  modified: number,
-  removed: number,
-  unchanged: number,
+	locale: string,
+	added: number,
+	modified: number,
+	removed: number,
+	unchanged: number,
 ): void {
-  console.log(`${pc.cyan("●")} ${pc.bold(locale)} ${pc.dim("(dry run)")}`);
-  console.log(
-    `  ${pc.green(`+${added}`)} added, ${pc.yellow(`~${modified}`)} modified, ${pc.red(`-${removed}`)} removed, ${pc.dim(`${unchanged} unchanged`)}`,
-  );
+	console.log(`${pc.cyan("●")} ${pc.bold(locale)} ${pc.dim("(dry run)")}`);
+	console.log(
+		`  ${pc.green(`+${added}`)} added, ${pc.yellow(`~${modified}`)} modified, ${pc.red(`-${removed}`)} removed, ${pc.dim(`${unchanged} unchanged`)}`,
+	);
 }
 
 export function logScanResult(total: number, files: number): void {
-  console.log(
-    `\n${pc.bold("Scan complete:")} ${pc.green(`${total} strings`)} from ${files} files\n`,
-  );
+	console.log(
+		`\n${pc.bold("Scan complete:")} ${pc.green(`${total} strings`)} from ${files} files\n`,
+	);
 }
 
 export function logError(message: string): void {
-  console.error(`${pc.red("✖")} ${message}`);
+	console.error(`${pc.red("✖")} ${message}`);
 }
 
 export function logWarning(message: string): void {
-  console.log(`${pc.yellow("⚠")} ${message}`);
+	console.log(`${pc.yellow("⚠")} ${message}`);
 }
 
 export function logInfo(message: string): void {
-  console.log(`  ${message}`);
+	console.log(`  ${message}`);
 }
 
 export function logSuccess(message: string): void {
-  console.log(`${pc.green("✔")} ${message}`);
+	console.log(`${pc.green("✔")} ${message}`);
 }
 
 export function logVerbose(message: string, verbose: boolean): void {
-  if (verbose) {
-    console.log(pc.dim(`  ${message}`));
-  }
+	if (verbose) {
+		console.log(pc.dim(`  ${message}`));
+	}
 }
 
 export function logUsage(tokens: string, cost?: string): void {
-  console.log(`\n  ${pc.dim("Tokens:")} ${tokens}`);
-  if (cost) console.log(`  ${pc.dim("Est. cost:")} ${cost}`);
+	console.log(`\n  ${pc.dim("Tokens:")} ${tokens}`);
+	if (cost) console.log(`  ${pc.dim("Est. cost:")} ${cost}`);
 }
 
 export function logProgress(
-  current: number,
-  total: number,
-  label: string,
+	current: number,
+	total: number,
+	label: string,
 ): void {
-  if (!process.stdout.isTTY) return;
-  const pct = total > 0 ? Math.round((current / total) * 100) : 0;
-  process.stdout.write(
-    `\r  ${pc.dim(label)} ${pc.bold(`${current}`)}${pc.dim(`/${total}`)} ${pc.dim(`(${pct}%)`)}`,
-  );
+	if (!process.stdout.isTTY) return;
+	const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+	process.stdout.write(
+		`\r  ${pc.dim(label)} ${pc.bold(`${current}`)}${pc.dim(`/${total}`)} ${pc.dim(`(${pct}%)`)}`,
+	);
 }
 
 export function logProgressClear(): void {
-  if (!process.stdout.isTTY) return;
-  process.stdout.write("\r" + " ".repeat(60) + "\r");
+	if (!process.stdout.isTTY) return;
+	process.stdout.write(`\r${" ".repeat(60)}\r`);
 }
