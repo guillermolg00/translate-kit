@@ -3,7 +3,7 @@ import _generate from "@babel/generator";
 import * as t from "@babel/types";
 import type { File } from "@babel/types";
 import type { NodePath } from "@babel/traverse";
-import { isContentProperty } from "../scanner/filters.js";
+import { isContentProperty, isTranslatableProp } from "../scanner/filters.js";
 import {
   resolveDefault,
   isInsideFunction,
@@ -64,6 +64,7 @@ export interface TransformOptions {
   forceClient?: boolean;
   moduleFactoryConstNames?: string[];
   moduleFactoryImportedNames?: string[];
+  translatableProps?: string[];
 }
 
 export function detectNamespace(keys: string[]): string | null {
@@ -676,10 +677,12 @@ function rewriteModuleFactoryReferences(
         return;
       }
 
-      // Skip type contexts
+      // Skip type contexts (TSTypeReference, TSTypeQuery, TSQualifiedName, etc.)
       if (
-        parent.type === "TSTypeReference" ||
-        parent.type === "TSTypeQuery"
+        parent.type.startsWith("TS") &&
+        parent.type !== "TSNonNullExpression" &&
+        parent.type !== "TSAsExpression" &&
+        parent.type !== "TSSatisfiesExpression"
       ) {
         return;
       }
@@ -801,6 +804,9 @@ export function transform(
       const text = path.node.value.trim();
       if (!text || !(text in textToKey)) return;
 
+      const compName = getComponentName(path);
+      if (!compName || !isPascalCase(compName)) return;
+
       const parent = path.parentPath;
       if (!parent?.isJSXElement()) return;
 
@@ -836,6 +842,9 @@ export function transform(
       if (isInsideClass(path)) return;
       const expr = path.node.expression;
       if (path.parent.type === "JSXAttribute") return;
+
+      const compName = getComponentName(path);
+      if (!compName || !isPascalCase(compName)) return;
 
       if (expr.type === "ConditionalExpression") {
         const result = transformConditionalBranch(expr, textToKey);
@@ -874,6 +883,17 @@ export function transform(
       if (isInsideClass(path)) return;
       const value = path.node.value;
       if (!value) return;
+
+      // Only wrap translatable props (placeholder, title, alt, aria-label, etc.)
+      const attrName = path.node.name;
+      const propName =
+        attrName.type === "JSXIdentifier"
+          ? attrName.name
+          : attrName.name.name;
+      if (!isTranslatableProp(propName, options.translatableProps)) return;
+
+      const compName = getComponentName(path);
+      if (!compName || !isPascalCase(compName)) return;
 
       if (
         value.type === "JSXExpressionContainer" &&
@@ -1903,6 +1923,9 @@ function transformInline(
       const text = path.node.value.trim();
       if (!text || !(text in textToKey)) return;
 
+      const compName = getComponentName(path);
+      if (!compName || !isPascalCase(compName)) return;
+
       const parent = path.parentPath;
       if (!parent?.isJSXElement()) return;
 
@@ -1951,13 +1974,15 @@ function transformInline(
       const expr = path.node.expression;
       if (path.parent.type === "JSXAttribute") return;
 
+      const compName = getComponentName(path);
+      if (!compName || !isPascalCase(compName)) return;
+
       if (expr.type === "ConditionalExpression") {
         const result = transformConditionalBranchInline(expr, textToKey);
         if (result.count > 0) {
           path.node.expression = result.node;
           stringsWrapped += result.count;
-          const compName = getComponentName(path);
-          if (compName) componentsNeedingT.add(compName);
+          componentsNeedingT.add(compName);
         }
         return;
       }
@@ -1979,14 +2004,24 @@ function transformInline(
         t.callExpression(t.identifier("t"), args),
       );
       stringsWrapped++;
-      const compName = getComponentName(path);
-      if (compName) componentsNeedingT.add(compName);
+      componentsNeedingT.add(compName);
     },
 
     JSXAttribute(path: NodePath<t.JSXAttribute>) {
       if (isInsideClass(path)) return;
       const value = path.node.value;
       if (!value) return;
+
+      // Only wrap translatable props (placeholder, title, alt, aria-label, etc.)
+      const attrName = path.node.name;
+      const propName =
+        attrName.type === "JSXIdentifier"
+          ? attrName.name
+          : attrName.name.name;
+      if (!isTranslatableProp(propName, options.translatableProps)) return;
+
+      const compName = getComponentName(path);
+      if (!compName || !isPascalCase(compName)) return;
 
       if (
         value.type === "JSXExpressionContainer" &&
@@ -1999,8 +2034,7 @@ function transformInline(
         if (result.count > 0) {
           path.node.value = t.jsxExpressionContainer(result.node);
           stringsWrapped += result.count;
-          const compName = getComponentName(path);
-          if (compName) componentsNeedingT.add(compName);
+          componentsNeedingT.add(compName);
         }
         return;
       }
@@ -2062,8 +2096,7 @@ function transformInline(
       );
       stringsWrapped++;
 
-      const compName = getComponentName(path);
-      if (compName) componentsNeedingT.add(compName);
+      componentsNeedingT.add(compName);
     },
 
     ObjectProperty(path: NodePath<t.ObjectProperty>) {

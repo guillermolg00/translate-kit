@@ -29,19 +29,9 @@ export function useT() {
 }
 `;
 
-const SINGLE_FILE_LOAD_BODY = `  const { readFile } = await import("node:fs/promises");
-  const { join } = await import("node:path");
-  try {
-    const filePath = join(process.cwd(), messagesDir, \`\${locale}.json\`);
-    const content = await readFile(filePath, "utf-8");
-    return JSON.parse(content);
-  } catch {
-    return {};
-  }`;
-
-const SPLIT_LOAD_BODY = `  const { readFile, readdir } = await import("node:fs/promises");
-  const { join } = await import("node:path");
-  try {
+const SPLIT_LOAD_BODY = `  try {
+    const { readFile, readdir } = await import("node:fs/promises");
+    const { join } = await import("node:path");
     const dir = join(process.cwd(), messagesDir, locale);
     let files: string[];
     try { files = (await readdir(dir)).filter(f => f.endsWith(".json")); } catch { return {}; }
@@ -62,6 +52,21 @@ const SPLIT_LOAD_BODY = `  const { readFile, readdir } = await import("node:fs/p
     return {};
   }`;
 
+function buildSingleFileLoadBody(
+  targetLocales: string[],
+  relativeMessagesDir: string,
+): string {
+  // Generate static import() calls per locale — works on all platforms
+  const cases = targetLocales
+    .map(
+      (locale) =>
+        `      case "${locale}": return (await import("${relativeMessagesDir}/${locale}.json")).default;`,
+    )
+    .join("\n");
+
+  return `  try {\n    switch (locale) {\n${cases}\n      default: return {};\n    }\n  } catch {\n    return {};\n  }`;
+}
+
 export function serverTemplate(
   clientBasename: string,
   opts?: {
@@ -69,6 +74,7 @@ export function serverTemplate(
     targetLocales: string[];
     messagesDir: string;
     splitByNamespace?: boolean;
+    relativeMessagesDir?: string;
   },
 ): string {
   if (!opts) {
@@ -106,6 +112,21 @@ export function createT(messages?: Messages) {
   const allLocales = [opts.sourceLocale, ...opts.targetLocales];
   const allLocalesStr = allLocales.map((l) => `"${l}"`).join(", ");
 
+  const isSplit = !!opts.splitByNamespace;
+  // Compute the relative import path for messages directory
+  let messagesImportPath = opts.relativeMessagesDir ?? opts.messagesDir;
+  // Ensure it starts with ./ or ../ for relative imports
+  if (!messagesImportPath.startsWith(".") && !messagesImportPath.startsWith("/")) {
+    messagesImportPath = `./${messagesImportPath}`;
+  }
+  const loadBody = isSplit
+    ? SPLIT_LOAD_BODY
+    : buildSingleFileLoadBody(opts.targetLocales, messagesImportPath);
+  // messagesDir const is only needed for split mode (filesystem loading)
+  const messagesDirConst = isSplit
+    ? `\nconst messagesDir = "${opts.messagesDir}";\n`
+    : "\n";
+
   return `import type { ReactNode } from "react";
 import { cache } from "react";
 export { I18nProvider } from "./${clientBasename}";
@@ -114,9 +135,7 @@ type Messages = Record<string, string>;
 
 const supported = [${allLocalesStr}] as const;
 type Locale = (typeof supported)[number];
-const defaultLocale: Locale = "${opts.sourceLocale}";
-const messagesDir = "${opts.messagesDir}";
-
+const defaultLocale: Locale = "${opts.sourceLocale}";${messagesDirConst}
 function parseAcceptLanguage(header: string): Locale {
   const langs = header
     .split(",")
@@ -138,8 +157,7 @@ export function setLocale(locale: string) {
   getLocaleStore().current = locale;
 }
 
-// Per-request cached message loading — works even when layout is cached during client-side navigation
-// Uses dynamic imports so this file can be safely imported from client components
+// Per-request cached message loading — works on all platforms via static imports
 const getCachedMessages = cache(async (): Promise<Messages> => {
   let locale: Locale | null = getLocaleStore().current as Locale | null;
 
@@ -162,7 +180,7 @@ const getCachedMessages = cache(async (): Promise<Messages> => {
   }
 
   if (locale === defaultLocale) return {};
-${opts.splitByNamespace ? SPLIT_LOAD_BODY : SINGLE_FILE_LOAD_BODY}
+${loadBody}
 });
 
 // Per-request message store (populated by setServerMessages in layout)

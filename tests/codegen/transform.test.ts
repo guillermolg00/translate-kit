@@ -83,6 +83,35 @@ describe("codegen transform", () => {
     );
   });
 
+  it("does NOT wrap non-translatable attribute props (e.g. size, variant)", () => {
+    const code = `function App() { return <Badge size="sm" variant="sm">sm</Badge>; }`;
+    const ast = parseFile(code, "test.tsx");
+    // "sm" is in textToKey but size/variant are NOT translatable props
+    const map = { sm: "common.sm" };
+    const result = transform(ast, map);
+
+    // JSX text "sm" SHOULD be wrapped
+    expect(result.code).toContain('t("sm")');
+    // size and variant attributes should NOT be wrapped
+    expect(result.code).toContain('size="sm"');
+    expect(result.code).toContain('variant="sm"');
+    expect(result.code).not.toContain('size={t(');
+    expect(result.code).not.toContain('variant={t(');
+  });
+
+  it("wraps translatable attribute props (placeholder, title, alt)", () => {
+    const code = `function App() { return <input placeholder="sm" title="sm" alt="sm" size="sm" />; }`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { sm: "common.sm" };
+    const result = transform(ast, map);
+
+    // placeholder, title, alt should be wrapped
+    expect(result.code).toContain('placeholder={t("sm")}');
+    expect(result.code).toContain('title={t("sm")}');
+    // size should NOT be wrapped
+    expect(result.code).toContain('size="sm"');
+  });
+
   it("uses custom i18nImport", () => {
     const code = readFileSync(join(fixturesDir, "before.tsx"), "utf-8");
     const ast = parseFile(code, "before.tsx");
@@ -451,6 +480,19 @@ describe("codegen transform (inline mode)", () => {
     const result = transform(ast, textToKey, inlineOpts);
 
     expect(result.code).toContain('t("Search...", "common.searchPlaceholder")');
+  });
+
+  it("does NOT wrap non-translatable attribute props in inline mode", () => {
+    const code = `function App() { return <Badge size="sm">sm</Badge>; }`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { sm: "common.sm" };
+    const result = transform(ast, map, inlineOpts);
+
+    // JSX text should be wrapped with <T>
+    expect(result.code).toContain("<T");
+    // size attribute should NOT be wrapped
+    expect(result.code).toContain('size="sm"');
+    expect(result.code).not.toContain('size={t(');
   });
 
   it("injects T and useT import for client files", () => {
@@ -1714,5 +1756,114 @@ export function Footer() {
     // so it should still get rewritten, but only from within the PascalCase component
     expect(result.modified).toBe(true);
     expect(result.code).toContain("footerLinks(t)");
+  });
+
+  it("does not crash on TSQualifiedName (typeof factoryRef)", () => {
+    const code = `"use client";
+import { useTranslations } from "next-intl";
+import { menuItems } from "./data";
+type Props = { items: typeof menuItems };
+export function Menu({ items }: Props) {
+  const t = useTranslations();
+  return <ul>{items.map(i => <li>{i.title}</li>)}</ul>;
+}`;
+    const ast = parseFile(code, "test.tsx");
+    // Should not crash when menuItems appears in a TSQualifiedName / TSTypeQuery
+    expect(() =>
+      transform(ast, {}, { moduleFactoryImportedNames: ["menuItems"] }),
+    ).not.toThrow();
+    const result = transform(
+      parseFile(code, "test.tsx"),
+      {},
+      { moduleFactoryImportedNames: ["menuItems"] },
+    );
+    // The reference inside `typeof menuItems` must NOT be rewritten
+    expect(result.code).toContain("typeof menuItems");
+  });
+});
+
+describe("codegen transform (anonymous arrow / non-component scope)", () => {
+  it("does NOT wrap strings in anonymous arrow functions inside objects", () => {
+    const code = `export const icons = {
+  logo: ({ size }: { size: number }) => <Image alt="Numa365 logo" width={size} />,
+};`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Numa365 logo": "icons.logo" };
+    const result = transform(ast, map);
+
+    // Anonymous arrow inside object → no PascalCase component → must NOT wrap
+    expect(result.stringsWrapped).toBe(0);
+    expect(result.modified).toBe(false);
+    expect(result.code).toContain('alt="Numa365 logo"');
+  });
+
+  it("wraps JSXText inside a PascalCase component", () => {
+    const code = `function Hero() { return <h1>Welcome to our platform</h1>; }`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Welcome to our platform": "hero.welcome" };
+    const result = transform(ast, map);
+
+    expect(result.stringsWrapped).toBe(1);
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain('t("welcome")');
+  });
+
+  it("does NOT wrap JSXAttribute in anonymous arrow functions inside objects", () => {
+    const code = `export const cards = {
+  hero: ({ title }: { title: string }) => <Card title="Featured product" />,
+};`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Featured product": "cards.featured" };
+    const result = transform(ast, map);
+
+    expect(result.stringsWrapped).toBe(0);
+    expect(result.modified).toBe(false);
+    expect(result.code).toContain('title="Featured product"');
+  });
+
+  it("does NOT wrap JSXExpressionContainer in anonymous arrow functions", () => {
+    const code = `export const renderers = {
+  greeting: ({ name }: { name: string }) => <p>{\`Hello \${name}\`}</p>,
+};`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Hello {name}": "renderers.hello" };
+    const result = transform(ast, map);
+
+    expect(result.stringsWrapped).toBe(0);
+    expect(result.modified).toBe(false);
+  });
+
+  it("does NOT wrap JSXAttribute in anonymous arrows (inline mode)", () => {
+    const inlineOpts: TransformOptions = {
+      mode: "inline",
+      componentPath: "@/components/t",
+    };
+    const code = `export const icons = {
+  logo: ({ size }: { size: number }) => <Image alt="Numa365 logo" width={size} />,
+};`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Numa365 logo": "icons.logo" };
+    const result = transform(ast, map, inlineOpts);
+
+    expect(result.stringsWrapped).toBe(0);
+    expect(result.modified).toBe(false);
+    expect(result.code).toContain('alt="Numa365 logo"');
+  });
+
+  it("does NOT wrap JSXText in anonymous arrows (inline mode)", () => {
+    const inlineOpts: TransformOptions = {
+      mode: "inline",
+      componentPath: "@/components/t",
+    };
+    const code = `export const renderers = {
+  hero: () => <h1>Welcome</h1>,
+};`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { Welcome: "hero.welcome" };
+    const result = transform(ast, map, inlineOpts);
+
+    expect(result.stringsWrapped).toBe(0);
+    expect(result.modified).toBe(false);
+    expect(result.code).toContain(">Welcome<");
   });
 });

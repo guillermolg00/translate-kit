@@ -106,12 +106,34 @@ describe("serverTemplate (with splitByNamespace)", () => {
 describe("serverTemplate (without splitByNamespace)", () => {
   const output = serverTemplate("t", defaultOpts);
 
-  it("reads single locale file", () => {
-    expect(output).toContain("${locale}.json");
+  it("uses static imports per locale instead of filesystem", () => {
+    // Should contain static import() calls for each target locale
+    expect(output).toContain('import("./messages/es.json")');
+    expect(output).toContain('import("./messages/fr.json")');
+    // Should NOT use node:fs
+    expect(output).not.toContain("node:fs");
+    expect(output).not.toContain("process.cwd()");
   });
 
   it("does NOT use readdir", () => {
     expect(output).not.toContain("readdir");
+  });
+});
+
+describe("serverTemplate (with relativeMessagesDir)", () => {
+  const output = serverTemplate("t", {
+    ...defaultOpts,
+    relativeMessagesDir: "../../../locales",
+  });
+
+  it("uses the provided relative path for imports", () => {
+    expect(output).toContain('import("../../../locales/es.json")');
+    expect(output).toContain('import("../../../locales/fr.json")');
+  });
+
+  it("does NOT use node:fs or process.cwd()", () => {
+    expect(output).not.toContain("node:fs");
+    expect(output).not.toContain("process.cwd()");
   });
 });
 

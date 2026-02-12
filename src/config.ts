@@ -1,6 +1,7 @@
 import { loadConfig } from "c12";
 import { z } from "zod";
 import type { TranslateKitConfig } from "./types.js";
+import { DEFAULT_TRANSLATABLE_PROPS } from "./scanner/filters.js";
 
 const configSchema = z
   .object({
@@ -31,7 +32,7 @@ const configSchema = z
         exclude: z.array(z.string()).optional(),
         translatableProps: z
           .array(z.string())
-          .default(["placeholder", "title", "alt", "aria-label"]),
+          .default([...DEFAULT_TRANSLATABLE_PROPS]),
         i18nImport: z.string().default("next-intl"),
       })
       .optional(),

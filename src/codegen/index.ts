@@ -27,6 +27,7 @@ export interface CodegenOptions {
   mode?: "keys" | "inline";
   componentPath?: string;
   moduleFactory?: boolean;
+  translatableProps?: string[];
   onProgress?: (completed: number, total: number) => void;
 }
 
@@ -987,6 +988,7 @@ export async function codegen(
     i18nImport: options.i18nImport,
     mode: options.mode,
     componentPath: options.componentPath,
+    translatableProps: options.translatableProps,
   };
 
   const parseLimit = pLimit(10);

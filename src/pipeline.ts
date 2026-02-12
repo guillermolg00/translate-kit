@@ -229,6 +229,7 @@ export async function runCodegenStep(
       mode,
       componentPath: config.inline?.componentPath,
       moduleFactory: input.moduleFactory,
+      translatableProps: config.scan!.translatableProps,
       onProgress: callbacks?.onProgress,
     },
     cwd,

@@ -1,4 +1,4 @@
-const DEFAULT_TRANSLATABLE_PROPS = [
+export const DEFAULT_TRANSLATABLE_PROPS = [
   "placeholder",
   "title",
   "alt",

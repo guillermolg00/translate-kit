@@ -457,10 +457,18 @@ async function dropInlineComponents(
   const serverFile = `${fsPath}-server.tsx`;
   const clientBasename = basename(fsPath);
 
+  // Compute relative path from server template dir to messagesDir for static imports
+  const serverDir = join(serverFile, "..");
+  const absoluteMessagesDir = join(cwd, localeOpts.messagesDir);
+  let relativeMessagesDir = relative(serverDir, absoluteMessagesDir);
+  if (!relativeMessagesDir.startsWith(".")) {
+    relativeMessagesDir = `./${relativeMessagesDir}`;
+  }
+
   await writeFile(clientFile, CLIENT_TEMPLATE, "utf-8");
   await writeFile(
     serverFile,
-    serverTemplate(clientBasename, localeOpts),
+    serverTemplate(clientBasename, { ...localeOpts, relativeMessagesDir }),
     "utf-8",
   );
 
