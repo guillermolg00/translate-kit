@@ -501,7 +501,8 @@ export const NavItem = () => {
     const result = transform(ast, textToKey, inlineOpts);
 
     expect(result.code).toContain("createT");
-    expect(result.code).toContain("const t = createT()");
+    expect(result.code).toContain("const t = await createT()");
+    expect(result.code).toMatch(/async function Form/);
   });
 
   it("is idempotent - does not double-wrap <T> components", () => {
@@ -575,10 +576,10 @@ function Footer() {
 
     expect(result.stringsWrapped).toBe(2);
     expect(result.code).toMatch(
-      /function Header\(\) \{\s*const t = createT\(\)/,
+      /async function Header\(\) \{\s*const t = await createT\(\)/,
     );
     expect(result.code).toMatch(
-      /function Footer\(\) \{\s*const t = createT\(\)/,
+      /async function Footer\(\) \{\s*const t = await createT\(\)/,
     );
   });
 
@@ -1392,5 +1393,326 @@ describe("detectNamespace", () => {
 
   it("returns null for single key without dot", () => {
     expect(detectNamespace(["greeting"])).toBeNull();
+  });
+});
+
+describe("codegen transform (module factory, keys mode)", () => {
+  it("converts module-level const to factory with t() calls", () => {
+    const code = `export const footerLinks = [
+  { title: "About", href: "/about" },
+  { title: "Contact", href: "/contact" },
+];`;
+    const ast = parseFile(code, "test.tsx");
+    const map = {
+      About: "footer.about",
+      Contact: "footer.contact",
+    };
+    const result = transform(ast, map, {
+      moduleFactoryConstNames: ["footerLinks"],
+    });
+
+    expect(result.stringsWrapped).toBe(2);
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain("t(");
+    // Should be wrapped as arrow factory
+    expect(result.code).toContain("t =>");
+  });
+
+  it("converts module-level const to factory in inline mode", () => {
+    const code = `export const footerLinks = [
+  { title: "About", href: "/about" },
+];`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { About: "footer.about" };
+    const result = transform(ast, map, {
+      mode: "inline",
+      componentPath: "@/components/t",
+      moduleFactoryConstNames: ["footerLinks"],
+    });
+
+    expect(result.stringsWrapped).toBe(1);
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain('t("About", "footer.about")');
+    expect(result.code).toContain("t =>");
+  });
+
+  it("does not transform if not in moduleFactoryConstNames", () => {
+    const code = `export const metadata = {
+  title: "My App",
+  description: "A great application.",
+};`;
+    const ast = parseFile(code, "test.tsx");
+    const map = {
+      "My App": "meta.title",
+      "A great application.": "meta.description",
+    };
+    const result = transform(ast, map, {
+      moduleFactoryConstNames: ["otherConst"],
+    });
+
+    expect(result.stringsWrapped).toBe(0);
+    expect(result.modified).toBe(false);
+  });
+
+  it("rewrites imported factory references with correct translatorId", () => {
+    const code = `"use client";
+import { useTranslations } from "next-intl";
+import { footerLinks } from "./data";
+export function Footer() {
+  const t = useTranslations("footer");
+  return <ul>{footerLinks.map(l => <li key={l.href}>{l.title}</li>)}</ul>;
+}`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, {}, {
+      moduleFactoryImportedNames: ["footerLinks"],
+    });
+
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain("footerLinks(t)");
+  });
+
+  it("uses fallback translatorId when component has const t conflict", () => {
+    const code = `"use client";
+import { footerLinks } from "./data";
+export function Footer() {
+  const t = {};
+  return <ul>{footerLinks.map(l => <li key={l.href}>Hello</li>)}</ul>;
+}`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { Hello: "footer.hello" };
+    const result = transform(ast, map, {
+      moduleFactoryImportedNames: ["footerLinks"],
+    });
+
+    expect(result.modified).toBe(true);
+    // Component gets __tk_t due to conflict
+    expect(result.code).toContain("__tk_t");
+    expect(result.code).toContain("footerLinks(__tk_t)");
+  });
+
+  it("rewrites shorthand { FOO } to { FOO: FOO(t) }", () => {
+    const code = `"use client";
+import { useTranslations } from "next-intl";
+import { navItems } from "./data";
+export function Nav() {
+  const t = useTranslations();
+  return <div data={JSON.stringify({ navItems })} />;
+}`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, {}, {
+      moduleFactoryImportedNames: ["navItems"],
+    });
+
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain("navItems: navItems(t)");
+    // Shorthand should be expanded — no shorthand in JSON.stringify arg
+    expect(result.code).toMatch(/JSON\.stringify\(\{[\s\S]*navItems:\s*navItems\(t\)/);
+  });
+
+  it("is idempotent - second run does not produce changes on factory consts", () => {
+    const code = `export const footerLinks = t => ([
+  { title: t("footer.about"), href: "/about" },
+]);`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { About: "footer.about" };
+    const result = transform(ast, map, {
+      moduleFactoryConstNames: ["footerLinks"],
+    });
+
+    // Already wrapped → no additional wrapping
+    expect(result.code).not.toContain("t => (t =>");
+  });
+
+  it("is idempotent - second run does not double-call imported references", () => {
+    const code = `"use client";
+import { useTranslations } from "next-intl";
+import { footerLinks } from "./data";
+export function Footer() {
+  const t = useTranslations();
+  return <ul>{footerLinks(t).map(l => <li>{l.title}</li>)}</ul>;
+}`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, {}, {
+      moduleFactoryImportedNames: ["footerLinks"],
+    });
+
+    // Already called → should not double-wrap
+    expect(result.code).not.toContain("footerLinks(t)(t)");
+    expect(result.code).toContain("footerLinks(t)");
+  });
+
+  it("rewrites aliased import { FOO as BAR } → BAR(t)", () => {
+    const code = `"use client";
+import { useTranslations } from "next-intl";
+import { footerLinks as links } from "./data";
+export function Footer() {
+  const t = useTranslations();
+  return <ul>{links.map(l => <li>{l.title}</li>)}</ul>;
+}`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, {}, {
+      moduleFactoryImportedNames: ["links"],
+    });
+
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain("links(t)");
+  });
+
+  it("disables namespace for components that use factory refs (avoids key mismatch)", () => {
+    const code = `"use client";
+import { footerLinks } from "./data";
+export function Hero() {
+  return <div><h1>Welcome</h1>{footerLinks.map(l => <a href={l.href}>{l.title}</a>)}</div>;
+}`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { Welcome: "hero.welcome" };
+    const result = transform(ast, map, {
+      moduleFactoryImportedNames: ["footerLinks"],
+    });
+
+    expect(result.modified).toBe(true);
+    // Component uses factory refs → no namespace (factory uses full keys)
+    expect(result.code).toContain("useTranslations()");
+    expect(result.code).not.toContain('useTranslations("hero")');
+    // Keys stay as full keys since no namespace stripping
+    expect(result.code).toContain('t("hero.welcome")');
+    // Factory ref gets rewritten
+    expect(result.code).toContain("footerLinks(t)");
+  });
+
+  it("injects t for import-only factory references (no own wrapped strings)", () => {
+    const code = `"use client";
+import { footerLinks } from "./data";
+export function Footer() {
+  return <ul>{footerLinks.map(l => <li key={l.href}>{l.title}</li>)}</ul>;
+}`;
+    const ast = parseFile(code, "test.tsx");
+    // No textToKey entries for this component's own strings
+    const result = transform(ast, {}, {
+      moduleFactoryImportedNames: ["footerLinks"],
+    });
+
+    expect(result.modified).toBe(true);
+    // t must be injected even though there are no wrapped strings
+    expect(result.code).toContain("useTranslations");
+    expect(result.code).toMatch(/const t = useTranslations\(\)/);
+    expect(result.code).toContain("footerLinks(t)");
+  });
+
+  it("does not rewrite shadowed local variable with same name as factory import", () => {
+    const code = `"use client";
+import { useTranslations } from "next-intl";
+import { items } from "./data";
+export function List() {
+  const t = useTranslations();
+  const items = [1, 2, 3];
+  return <ul>{items.map(i => <li key={i}>{i}</li>)}</ul>;
+}`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, {}, {
+      moduleFactoryImportedNames: ["items"],
+    });
+
+    // The local `const items = [1,2,3]` shadows the import.
+    // Should NOT be rewritten to items(t).
+    expect(result.code).not.toContain("items(t)");
+  });
+
+  it("does not rewrite destructuring param with same name as factory import", () => {
+    const code = `"use client";
+import { useTranslations } from "next-intl";
+import { navItems } from "./data";
+export function Nav({ navItems }: { navItems: any[] }) {
+  const t = useTranslations();
+  return <ul>{navItems.map(i => <li>{i.title}</li>)}</ul>;
+}`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, {}, {
+      moduleFactoryImportedNames: ["navItems"],
+    });
+
+    // navItems is a destructured prop, not the import. Should not be rewritten.
+    expect(result.code).not.toContain("navItems(t)");
+  });
+
+  it("wraps typed const (strips type annotation)", () => {
+    const code = `export const footerLinks: SidebarNavItem[] = [
+  { title: "About", href: "/about" },
+];`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { About: "footer.about" };
+    const result = transform(ast, map, {
+      moduleFactoryConstNames: ["footerLinks"],
+    });
+
+    expect(result.stringsWrapped).toBe(1);
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain("t =>");
+    expect(result.code).toContain('t("footer.about")');
+    // Type annotation should be stripped
+    expect(result.code).not.toContain("SidebarNavItem");
+  });
+
+  it("does not inject useTranslations import for data-only factory file (no components)", () => {
+    // Bug fix: data files with only factory consts should NOT get a spurious
+    // import { useTranslations } from "next-intl"
+    const code = `export const siteConfig = {
+  name: "MySite",
+  description: "Unlock the power",
+  url: "http://localhost:3000",
+};`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { "Unlock the power": "site.unlockPower" };
+    const result = transform(ast, map, {
+      moduleFactoryConstNames: ["siteConfig"],
+    });
+
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain("t =>");
+    expect(result.code).toContain('t("site.unlockPower")');
+    // Should NOT have useTranslations or getTranslations import
+    expect(result.code).not.toContain("useTranslations");
+    expect(result.code).not.toContain("getTranslations");
+  });
+
+  it("does not inject getTranslations import for server data-only factory file", () => {
+    // Same for server files (no "use client", no hooks)
+    const code = `export const links = [
+  { title: "About", href: "/about" },
+];`;
+    const ast = parseFile(code, "test.tsx");
+    const map = { About: "footer.about" };
+    const result = transform(ast, map, {
+      moduleFactoryConstNames: ["links"],
+    });
+
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain("t =>");
+    // Should NOT have getTranslations import
+    expect(result.code).not.toContain("getTranslations");
+    expect(result.code).not.toContain("next-intl");
+  });
+
+  it("does not rewrite factory ref used in non-PascalCase helper function", () => {
+    const code = `"use client";
+import { useTranslations } from "next-intl";
+import { footerLinks } from "./data";
+function formatLinks(items: any[]) {
+  return items.map(l => ({ ...l, formatted: true }));
+}
+export function Footer() {
+  const t = useTranslations();
+  const formatted = formatLinks(footerLinks);
+  return <ul>{formatted.map(l => <li>{l.title}</li>)}</ul>;
+}`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, {}, {
+      moduleFactoryImportedNames: ["footerLinks"],
+    });
+
+    // footerLinks is used as argument to formatLinks (inside Footer, PascalCase)
+    // so it should still get rewritten, but only from within the PascalCase component
+    expect(result.modified).toBe(true);
+    expect(result.code).toContain("footerLinks(t)");
   });
 });

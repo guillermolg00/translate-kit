@@ -52,6 +52,7 @@ export interface ExtractedString {
     | "jsx-attribute"
     | "jsx-expression"
     | "object-property"
+    | "module-object-property"
     | "t-call"
     | "T-component";
   file: string;
@@ -64,6 +65,7 @@ export interface ExtractedString {
   siblingTexts?: string[];
   routePath?: string;
   sectionHeading?: string;
+  parentConstName?: string;
 }
 
 export interface TranslationResult {

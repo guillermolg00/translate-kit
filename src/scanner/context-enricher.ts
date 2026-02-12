@@ -1,8 +1,8 @@
 import type { ExtractedString } from "../types.js";
 
 export function deriveRoutePath(filePath: string): string | undefined {
-  // Next.js app router: src/app/<route>/page.tsx
-  const appMatch = filePath.match(/src\/app\/(.+?)\/page\.[jt]sx?$/);
+  // Next.js app router: src/app/<route>/page.tsx or app/<route>/page.tsx
+  const appMatch = filePath.match(/(?:src\/)?app\/(.+?)\/page\.[jt]sx?$/);
   if (appMatch) return appMatch[1].replace(/\//g, ".");
 
   // Next.js pages router: src/pages/<route>.tsx or pages/<route>.tsx
@@ -12,8 +12,8 @@ export function deriveRoutePath(filePath: string): string | undefined {
     return route || undefined;
   }
 
-  // Components: src/components/<section>/Component.tsx
-  const compMatch = filePath.match(/src\/components\/(.+?)\//);
+  // Components: src/components/<section>/Component.tsx or components/<section>/Component.tsx
+  const compMatch = filePath.match(/(?:src\/)?components\/(.+?)\//);
   if (compMatch) return compMatch[1];
 
   return undefined;

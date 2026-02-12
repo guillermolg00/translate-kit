@@ -19,6 +19,16 @@ describe("deriveRoutePath", () => {
     expect(deriveRoutePath("src/components/dashboard/Chart.tsx")).toBe("dashboard");
   });
 
+  it("extracts route from app router without src/ prefix", () => {
+    expect(deriveRoutePath("app/about/page.tsx")).toBe("about");
+    expect(deriveRoutePath("app/blog/posts/page.tsx")).toBe("blog.posts");
+  });
+
+  it("extracts section from components path without src/ prefix", () => {
+    expect(deriveRoutePath("components/hero/Hero.tsx")).toBe("hero");
+    expect(deriveRoutePath("components/auth/LoginForm.tsx")).toBe("auth");
+  });
+
   it("returns undefined for unrecognized paths", () => {
     expect(deriveRoutePath("src/utils/helpers.ts")).toBeUndefined();
     expect(deriveRoutePath("lib/config.ts")).toBeUndefined();

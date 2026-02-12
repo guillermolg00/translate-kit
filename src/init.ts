@@ -3,18 +3,19 @@ import { existsSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { loadTranslateKitConfig } from "./config.js";
-import {
-  runScanStep,
-  runCodegenStep,
-  runTranslateStep,
-} from "./pipeline.js";
+import { runScanStep, runCodegenStep, runTranslateStep } from "./pipeline.js";
 import {
   CLIENT_TEMPLATE,
   serverTemplate,
   generateI18nHelper,
 } from "./templates/t-component.js";
 import { parseFile } from "./scanner/parser.js";
-import { createUsageTracker, estimateCost, formatUsage, formatCost } from "./usage.js";
+import {
+  createUsageTracker,
+  estimateCost,
+  formatUsage,
+  formatCost,
+} from "./usage.js";
 import { validateLocale } from "./cli-utils.js";
 
 const AI_PROVIDERS = {
@@ -48,6 +49,7 @@ const AI_PROVIDERS = {
 type ProviderKey = keyof typeof AI_PROVIDERS;
 
 const LOCALE_OPTIONS = [
+  { value: "en", label: "English (en)" },
   { value: "es", label: "Spanish (es)" },
   { value: "fr", label: "French (fr)" },
   { value: "de", label: "German (de)" },
@@ -60,17 +62,31 @@ const LOCALE_OPTIONS = [
   { value: "it", label: "Italian (it)" },
 ];
 
-function detectIncludePatterns(cwd: string): string[] {
+export function detectIncludePatterns(cwd: string): string[] {
   const patterns: string[] = [];
-  if (existsSync(join(cwd, "app")))
+  const hasSrc = existsSync(join(cwd, "src"));
+
+  // App router — prefer src/app over app
+  if (hasSrc && existsSync(join(cwd, "src", "app"))) {
+    patterns.push("src/app/**/*.tsx", "src/app/**/*.jsx");
+  } else if (existsSync(join(cwd, "app"))) {
     patterns.push("app/**/*.tsx", "app/**/*.jsx");
-  if (existsSync(join(cwd, "src")))
-    patterns.push("src/**/*.tsx", "src/**/*.jsx");
-  if (existsSync(join(cwd, "pages")))
-    patterns.push("pages/**/*.tsx", "pages/**/*.jsx");
-  if (existsSync(join(cwd, "src", "app"))) {
-    return patterns.filter((p) => !p.startsWith("app/"));
   }
+
+  // Pages router
+  if (hasSrc && existsSync(join(cwd, "src", "pages"))) {
+    patterns.push("src/pages/**/*.tsx", "src/pages/**/*.jsx");
+  } else if (existsSync(join(cwd, "pages"))) {
+    patterns.push("pages/**/*.tsx", "pages/**/*.jsx");
+  }
+
+  // Components
+  if (hasSrc && existsSync(join(cwd, "src", "components"))) {
+    patterns.push("src/components/**/*.tsx", "src/components/**/*.jsx");
+  } else if (existsSync(join(cwd, "components"))) {
+    patterns.push("components/**/*.tsx", "components/**/*.jsx");
+  }
+
   return patterns.length > 0 ? patterns : ["**/*.tsx", "**/*.jsx"];
 }
 
@@ -161,6 +177,13 @@ export function generateConfigFile(opts: {
   lines.push(
     `    include: [${opts.includePatterns.map((p) => `"${p}"`).join(", ")}],`,
   );
+  lines.push(`    // Add more directories as needed. Examples:`);
+  lines.push(`    // "config/**/*.ts"   — for data/config files (needed with --module-factory)`);
+  lines.push(`    // "lib/**/*.ts"      — for utility files with translatable strings`);
+  lines.push(`    // "layouts/**/*.tsx"  — for layout components`);
+  lines.push(`    //`);
+  lines.push(`    // Note: When using codegen --module-factory, include any directories`);
+  lines.push(`    // that contain exported constants with translatable strings (e.g. config/).`);
   lines.push(`    exclude: ["**/*.test.*", "**/*.spec.*"],`);
   if (opts.mode === "keys" && opts.i18nImport) {
     lines.push(`    i18nImport: "${opts.i18nImport}",`);
@@ -364,11 +387,7 @@ export default getRequestConfig(async () => {
 
       const updated = importLine + "\n" + pluginLine + "\n" + wrapped;
       if (
-        await safeWriteModifiedFile(
-          nextConfigPath,
-          updated,
-          "next.config.ts",
-        )
+        await safeWriteModifiedFile(nextConfigPath, updated, "next.config.ts")
       ) {
         filesCreated.push("next.config.ts (updated)");
       }
@@ -402,18 +421,18 @@ export default getRequestConfig(async () => {
       );
 
       if (
-        await safeWriteModifiedFile(
-          layoutPath,
-          layoutContent,
-          "root layout",
-        )
+        await safeWriteModifiedFile(layoutPath, layoutContent, "root layout")
       ) {
         filesCreated.push(relative(cwd, layoutPath) + " (updated)");
       }
     }
   }
 
-  await createEmptyMessageFiles(join(cwd, messagesDir), allLocales, splitByNamespace);
+  await createEmptyMessageFiles(
+    join(cwd, messagesDir),
+    allLocales,
+    splitByNamespace,
+  );
 
   if (filesCreated.length > 0) {
     p.log.success(`next-intl configured: ${filesCreated.join(", ")}`);
@@ -439,7 +458,11 @@ async function dropInlineComponents(
   const clientBasename = basename(fsPath);
 
   await writeFile(clientFile, CLIENT_TEMPLATE, "utf-8");
-  await writeFile(serverFile, serverTemplate(clientBasename, localeOpts), "utf-8");
+  await writeFile(
+    serverFile,
+    serverTemplate(clientBasename, localeOpts),
+    "utf-8",
+  );
 
   const relClient = relative(cwd, clientFile);
   const relServer = relative(cwd, serverFile);
@@ -501,21 +524,18 @@ async function setupInlineI18n(
       );
 
       if (
-        await safeWriteModifiedFile(
-          layoutPath,
-          layoutContent,
-          "root layout",
-        )
+        await safeWriteModifiedFile(layoutPath, layoutContent, "root layout")
       ) {
         filesCreated.push(relative(cwd, layoutPath) + " (updated)");
       }
     }
   }
 
-  await createEmptyMessageFiles(join(cwd, messagesDir), [
-    sourceLocale,
-    ...targetLocales,
-  ], splitByNamespace);
+  await createEmptyMessageFiles(
+    join(cwd, messagesDir),
+    [sourceLocale, ...targetLocales],
+    splitByNamespace,
+  );
 
   if (filesCreated.length > 0) {
     p.log.success(`Inline i18n configured: ${filesCreated.join(", ")}`);
@@ -573,7 +593,11 @@ export async function updateLayoutWithSelectiveMessages(
   }
 
   if (
-    await safeWriteModifiedFile(layoutPath, content, "root layout (selective messages)")
+    await safeWriteModifiedFile(
+      layoutPath,
+      content,
+      "root layout (selective messages)",
+    )
   ) {
     const rel = relative(cwd, layoutPath);
     p.log.success(
@@ -663,7 +687,8 @@ export async function runInitWizard(): Promise<void> {
   let splitByNamespace = false;
   {
     const split = await p.confirm({
-      message: "Split messages by namespace? (messages/en/hero.json instead of en.json)",
+      message:
+        "Split messages by namespace? (messages/en/hero.json instead of en.json)",
       initialValue: false,
     });
     if (p.isCancel(split)) cancel();
@@ -671,23 +696,14 @@ export async function runInitWizard(): Promise<void> {
   }
 
   const detected = detectIncludePatterns(cwd);
-  let includePatterns: string[];
 
-  const useDetected = await p.confirm({
-    message: `Detected: ${detected.join(", ")} — Use these patterns?`,
+  const patternsInput = await p.text({
+    message: "Include patterns (comma-separated):",
+    initialValue: detected.join(", "),
+    placeholder: "app/**/*.tsx, components/**/*.tsx",
   });
-  if (p.isCancel(useDetected)) cancel();
-
-  if (useDetected) {
-    includePatterns = detected;
-  } else {
-    const customPatterns = await p.text({
-      message: "Include patterns (comma-separated):",
-      initialValue: "src/**/*.tsx, src/**/*.jsx",
-    });
-    if (p.isCancel(customPatterns)) cancel();
-    includePatterns = customPatterns.split(",").map((s) => s.trim());
-  }
+  if (p.isCancel(patternsInput)) cancel();
+  const includePatterns = patternsInput.split(",").map((s) => s.trim());
 
   let i18nImport = "";
   let componentPath: string | undefined;
@@ -768,7 +784,13 @@ export async function runInitWizard(): Promise<void> {
       splitByNamespace,
     );
   } else {
-    await setupNextIntl(cwd, sourceLocale, targetLocales, messagesDir, splitByNamespace);
+    await setupNextIntl(
+      cwd,
+      sourceLocale,
+      targetLocales,
+      messagesDir,
+      splitByNamespace,
+    );
   }
 
   const runPipeline = await p.confirm({
@@ -832,7 +854,10 @@ export async function runInitWizard(): Promise<void> {
 
   // Update layout with selective message passing if client namespaces were found
   if (codegenResult.clientNamespaces.length > 0) {
-    await updateLayoutWithSelectiveMessages(cwd, codegenResult.clientNamespaces);
+    await updateLayoutWithSelectiveMessages(
+      cwd,
+      codegenResult.clientNamespaces,
+    );
   }
 
   // --- TRANSLATE ---

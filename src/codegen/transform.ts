@@ -8,6 +8,8 @@ import {
   resolveDefault,
   isInsideFunction,
   getComponentName,
+  getTopLevelConstName,
+  isPascalCase,
 } from "../utils/ast-helpers.js";
 import {
   buildTemplateLiteralText,
@@ -60,6 +62,8 @@ export interface TransformOptions {
   mode?: "keys" | "inline";
   componentPath?: string;
   forceClient?: boolean;
+  moduleFactoryConstNames?: string[];
+  moduleFactoryImportedNames?: string[];
 }
 
 export function detectNamespace(keys: string[]): string | null {
@@ -275,11 +279,18 @@ function ensureNamedImportLocal(
   importSource: string,
   importedName: string,
 ): string {
-  const existingLocal = resolveNamedImportLocal(ast, importSource, importedName);
+  const existingLocal = resolveNamedImportLocal(
+    ast,
+    importSource,
+    importedName,
+  );
   if (existingLocal) return existingLocal;
 
   for (const node of ast.program.body) {
-    if (node.type !== "ImportDeclaration" || node.source.value !== importSource) {
+    if (
+      node.type !== "ImportDeclaration" ||
+      node.source.value !== importSource
+    ) {
       continue;
     }
     node.specifiers.push(
@@ -289,12 +300,7 @@ function ensureNamedImportLocal(
   }
 
   const importDecl = t.importDeclaration(
-    [
-      t.importSpecifier(
-        t.identifier(importedName),
-        t.identifier(importedName),
-      ),
-    ],
+    [t.importSpecifier(t.identifier(importedName), t.identifier(importedName))],
     t.stringLiteral(importSource),
   );
 
@@ -308,7 +314,9 @@ function ensureNamedImportLocal(
   return importedName;
 }
 
-function getNearestFunctionPath(path: NodePath<t.Node>): NodePath<t.Function> | null {
+function getNearestFunctionPath(
+  path: NodePath<t.Node>,
+): NodePath<t.Function> | null {
   let current = path.parentPath;
   while (current) {
     if (
@@ -531,6 +539,228 @@ function transformConditionalBranchInline(
   return { node, count: 0 };
 }
 
+/**
+ * Pre-scan AST to find which React components reference any of the given
+ * imported factory names.  Returns a set of component names that will need
+ * a translator injected.  This runs BEFORE the main injection phase so we
+ * can include those components proactively.
+ */
+function preDiscoverFactoryRefComponents(
+  ast: File,
+  importedNames: string[],
+): Set<string> {
+  if (importedNames.length === 0) return new Set();
+  const nameSet = new Set(importedNames);
+  const comps = new Set<string>();
+
+  traverse(ast, {
+    Identifier(path: NodePath<t.Identifier>) {
+      if (!nameSet.has(path.node.name)) return;
+      const parent = path.parent;
+      // Skip import/export specifiers
+      if (
+        parent.type === "ImportSpecifier" ||
+        parent.type === "ImportDefaultSpecifier" ||
+        parent.type === "ImportNamespaceSpecifier" ||
+        parent.type === "ExportSpecifier"
+      ) return;
+      // Skip declaration id
+      if (parent.type === "VariableDeclarator" && (parent as t.VariableDeclarator).id === path.node) return;
+      // Skip already-callee (idempotent)
+      if (parent.type === "CallExpression" && (parent as t.CallExpression).callee === path.node) return;
+      // Verify binding comes from module-level (import or top-level const)
+      const binding = path.scope?.getBinding(path.node.name);
+      if (binding) {
+        const bPath = binding.path;
+        const isImportBinding = bPath.isImportSpecifier() || bPath.isImportDefaultSpecifier();
+        const isTopLevelConst =
+          bPath.isVariableDeclarator() &&
+          bPath.parentPath?.isVariableDeclaration() &&
+          (bPath.parentPath.parentPath?.isProgram() ||
+            bPath.parentPath.parentPath?.isExportNamedDeclaration());
+        if (!isImportBinding && !isTopLevelConst) return;
+      }
+      // Must be inside a PascalCase function (React component)
+      if (!isInsideFunction(path)) return;
+      const comp = getComponentName(path);
+      if (comp && isPascalCase(comp)) comps.add(comp);
+    },
+  });
+
+  return comps;
+}
+
+function wrapModuleFactoryDeclarations(
+  ast: File,
+  constNames: string[],
+): boolean {
+  if (constNames.length === 0) return false;
+  const nameSet = new Set(constNames);
+  let wrapped = false;
+
+  for (const node of ast.program.body) {
+    let decl: t.VariableDeclaration | undefined;
+    if (node.type === "VariableDeclaration") {
+      decl = node;
+    } else if (
+      node.type === "ExportNamedDeclaration" &&
+      node.declaration?.type === "VariableDeclaration"
+    ) {
+      decl = node.declaration;
+    }
+    if (!decl || decl.kind !== "const") continue;
+
+    for (const declarator of decl.declarations) {
+      if (declarator.id.type !== "Identifier") continue;
+      if (!nameSet.has(declarator.id.name)) continue;
+      if (!declarator.init) continue;
+
+      // Strip type annotation if present (type is no longer valid after wrapping as factory)
+      if ((declarator.id as any).typeAnnotation) {
+        (declarator.id as any).typeAnnotation = null;
+      }
+
+      // Idempotency: if init is already an arrow with 1 param named `t`, skip
+      if (
+        declarator.init.type === "ArrowFunctionExpression" &&
+        declarator.init.params.length === 1 &&
+        declarator.init.params[0].type === "Identifier" &&
+        declarator.init.params[0].name === "t"
+      ) {
+        continue;
+      }
+
+      // Wrap: const FOO = expr → const FOO = (t) => (expr)
+      const originalInit = declarator.init;
+      declarator.init = t.arrowFunctionExpression(
+        [t.identifier("t")],
+        t.parenthesizedExpression(originalInit),
+      );
+      wrapped = true;
+    }
+  }
+  return wrapped;
+}
+
+function rewriteModuleFactoryReferences(
+  ast: File,
+  importedNames: string[],
+  componentTranslatorIds: Map<string, string>,
+): { componentsNeedingT: Set<string>; rewrote: boolean } {
+  if (importedNames.length === 0) return { componentsNeedingT: new Set(), rewrote: false };
+  const nameSet = new Set(importedNames);
+  const componentsNeedingT = new Set<string>();
+  let rewrote = false;
+
+  // Collect rewrite targets first, then apply — avoids AST mutation issues
+  // during traversal (e.g. shorthand ObjectProperty key/value sharing).
+  const rewrites: Array<{
+    path: NodePath<t.Identifier>;
+    translatorId: string;
+    compName: string;
+    shorthandProp?: t.ObjectProperty;
+  }> = [];
+
+  traverse(ast, {
+    Identifier(path: NodePath<t.Identifier>) {
+      if (!nameSet.has(path.node.name)) return;
+
+      const parent = path.parent;
+      // Skip import/export specifiers
+      if (
+        parent.type === "ImportSpecifier" ||
+        parent.type === "ImportDefaultSpecifier" ||
+        parent.type === "ImportNamespaceSpecifier" ||
+        parent.type === "ExportSpecifier"
+      ) {
+        return;
+      }
+
+      // Skip type contexts
+      if (
+        parent.type === "TSTypeReference" ||
+        parent.type === "TSTypeQuery"
+      ) {
+        return;
+      }
+
+      // Idempotency: skip if already callee of CallExpression
+      if (
+        parent.type === "CallExpression" &&
+        (parent as t.CallExpression).callee === path.node
+      ) {
+        return;
+      }
+
+      // For shorthand ObjectProperty, key and value reference the same node.
+      // Only handle it once — when visiting as "value" position.
+      if (
+        parent.type === "ObjectProperty" &&
+        (parent as t.ObjectProperty).key === path.node
+      ) {
+        if ((parent as t.ObjectProperty).shorthand) {
+          // Will be handled as a shorthand rewrite — but only from value position.
+          // Skip the key position visit to avoid double processing.
+          if (path.key === "key") return;
+        } else {
+          // Non-shorthand key: never rewrite
+          return;
+        }
+      }
+
+      // Verify this Identifier refers to the module-level binding (import or
+      // top-level const), not a shadowed local variable or destructuring param.
+      const binding = path.scope?.getBinding(path.node.name);
+      if (binding) {
+        const bPath = binding.path;
+        const isImportBinding = bPath.isImportSpecifier() || bPath.isImportDefaultSpecifier();
+        const isTopLevelConst =
+          bPath.isVariableDeclarator() &&
+          bPath.parentPath?.isVariableDeclaration() &&
+          (bPath.parentPath.parentPath?.isProgram() ||
+            bPath.parentPath.parentPath?.isExportNamedDeclaration());
+        if (!isImportBinding && !isTopLevelConst) return;
+      }
+
+      // Must be inside a PascalCase function (React component)
+      if (!isInsideFunction(path)) return;
+      const compName = getComponentName(path);
+      if (!compName || !isPascalCase(compName)) return;
+
+      const translatorId = componentTranslatorIds.get(compName) ?? "t";
+
+      if (
+        parent.type === "ObjectProperty" &&
+        (parent as t.ObjectProperty).shorthand
+      ) {
+        rewrites.push({ path, translatorId, compName, shorthandProp: parent as t.ObjectProperty });
+      } else {
+        rewrites.push({ path, translatorId, compName });
+      }
+    },
+  });
+
+  // Apply collected rewrites
+  for (const { path, translatorId, compName, shorthandProp } of rewrites) {
+    const callExpr = t.callExpression(
+      t.identifier(path.node.name),
+      [t.identifier(translatorId)],
+    );
+
+    if (shorthandProp) {
+      shorthandProp.shorthand = false;
+      shorthandProp.value = callExpr;
+    } else {
+      path.replaceWith(callExpr);
+    }
+
+    componentsNeedingT.add(compName);
+    rewrote = true;
+  }
+
+  return { componentsNeedingT, rewrote };
+}
+
 export function transform(
   ast: File,
   textToKey: Record<string, string>,
@@ -718,9 +948,84 @@ export function transform(
 
     ObjectProperty(path: NodePath<t.ObjectProperty>) {
       if (isInsideClass(path)) return;
-      if (!isInsideFunction(path)) return;
 
-      const ownerFn = getNearestFunctionPath(path as unknown as NodePath<t.Node>);
+      const factoryConstNames = options.moduleFactoryConstNames ?? [];
+      const inFunction = isInsideFunction(path);
+
+      if (!inFunction) {
+        // Module-factory path: only if inside a const from the plan
+        const constName = getTopLevelConstName(path as unknown as NodePath<t.Node>);
+        if (!constName || !factoryConstNames.includes(constName)) return;
+
+        const keyNode = path.node.key;
+        if (keyNode.type !== "Identifier" && keyNode.type !== "StringLiteral")
+          return;
+        const propName =
+          keyNode.type === "Identifier" ? keyNode.name : keyNode.value;
+        if (!isContentProperty(propName)) return;
+
+        const valueNode = path.node.value;
+
+        if (valueNode.type === "ConditionalExpression") {
+          const result = transformConditionalBranch(valueNode, textToKey);
+          if (result.count > 0) {
+            path.node.value = result.node;
+            stringsWrapped += result.count;
+            collectConditionalKeys(valueNode, textToKey).forEach((k) =>
+              allUsedKeys.push(k),
+            );
+          }
+          return;
+        }
+
+        let text: string | undefined;
+        let templateInfo:
+          | {
+              placeholders: string[];
+              expressions: t.TemplateLiteral["expressions"];
+            }
+          | undefined;
+
+        if (valueNode.type === "StringLiteral") {
+          text = valueNode.value;
+        } else if (valueNode.type === "TemplateLiteral") {
+          const info = buildTemplateLiteralText(
+            valueNode.quasis,
+            valueNode.expressions,
+          );
+          if (info) {
+            text = info.text;
+            templateInfo = {
+              placeholders: info.placeholders,
+              expressions: valueNode.expressions,
+            };
+          }
+        }
+
+        if (!text || !(text in textToKey)) return;
+
+        const key = textToKey[text];
+        const args: t.Expression[] = [t.stringLiteral(key)];
+        if (templateInfo && templateInfo.placeholders.length > 0) {
+          args.push(
+            buildValuesObject(
+              templateInfo.expressions,
+              templateInfo.placeholders,
+            ),
+          );
+        }
+        path.node.value = markGeneratedCall(
+          t.callExpression(t.identifier("t"), args),
+        );
+        stringsWrapped++;
+        allUsedKeys.push(key);
+        return;
+      }
+
+      // Existing function-scoped logic
+      const ownerFn = getNearestFunctionPath(
+        path as unknown as NodePath<t.Node>,
+      );
       if (!ownerFn) return;
       if (!functionContainsJSX(ownerFn.node)) return;
       const compName = getComponentName(ownerFn as unknown as NodePath<t.Node>);
@@ -791,7 +1096,11 @@ export function transform(
     },
   });
 
-  if (stringsWrapped === 0) {
+  const hasModuleFactoryWork =
+    (options.moduleFactoryConstNames?.length ?? 0) > 0 ||
+    (options.moduleFactoryImportedNames?.length ?? 0) > 0;
+
+  if (stringsWrapped === 0 && !hasModuleFactoryWork) {
     return {
       code: generate(ast).code,
       stringsWrapped: 0,
@@ -800,21 +1109,40 @@ export function transform(
     };
   }
 
-  // Compute namespace per component
+  // Pre-scan: discover which components will need `t` due to factory imports,
+  // so the injection phase can handle them proactively.
+  const moduleFactoryImportedNames = options.moduleFactoryImportedNames ?? [];
+  const factoryRefComponents = preDiscoverFactoryRefComponents(ast, moduleFactoryImportedNames);
+  for (const comp of factoryRefComponents) {
+    componentsNeedingT.add(comp);
+  }
+
+  // Compute namespace per component.
+  // Components that reference factory imports must NOT be namespaced, because
+  // the factory functions use full keys (e.g. "footer.about") and a namespaced
+  // translator would mangle them.
   const componentNamespaces = new Map<string, string | null>();
   for (const [comp, keys] of componentKeys) {
-    componentNamespaces.set(comp, detectNamespace([...keys]));
+    if (factoryRefComponents.has(comp)) {
+      componentNamespaces.set(comp, null);
+    } else {
+      componentNamespaces.set(comp, detectNamespace([...keys]));
+    }
+  }
+  // Ensure factory-only components (no own keys) still get into the map
+  for (const comp of factoryRefComponents) {
+    if (!componentNamespaces.has(comp)) {
+      componentNamespaces.set(comp, null);
+    }
   }
 
   const namespacedComponents = new Set<string>();
   const componentTranslatorIds = new Map<string, string>();
 
   if (isClient) {
-    const useTranslationsLocal = ensureNamedImportLocal(
-      ast,
-      importSource,
-      "useTranslations",
-    );
+    const useTranslationsLocal = componentsNeedingT.size > 0
+      ? ensureNamedImportLocal(ast, importSource, "useTranslations")
+      : "useTranslations";
 
     traverse(ast, {
       FunctionDeclaration(path: NodePath<t.FunctionDeclaration>) {
@@ -923,11 +1251,9 @@ export function transform(
     });
   } else {
     const serverSource = `${importSource}/server`;
-    const getTranslationsLocal = ensureNamedImportLocal(
-      ast,
-      serverSource,
-      "getTranslations",
-    );
+    const getTranslationsLocal = componentsNeedingT.size > 0
+      ? ensureNamedImportLocal(ast, serverSource, "getTranslations")
+      : "getTranslations";
 
     traverse(ast, {
       FunctionDeclaration(path: NodePath<t.FunctionDeclaration>) {
@@ -1047,6 +1373,10 @@ export function transform(
     });
   }
 
+  // Module factory: wrap const declarations as arrow factories
+  const moduleFactoryConstNames = options.moduleFactoryConstNames ?? [];
+  const didWrapFactory = wrapModuleFactoryDeclarations(ast, moduleFactoryConstNames);
+
   // Rewrite keys to strip namespace prefix only for components where namespace was established
   const effectiveNamespaces = new Map<string, string | null>();
   for (const [comp, ns] of componentNamespaces) {
@@ -1055,15 +1385,27 @@ export function transform(
   rewriteKeysForNamespaces(ast, effectiveNamespaces);
   rewriteGeneratedCallsForTranslator(ast, componentTranslatorIds);
 
+  // Module factory: rewrite references to imported factory consts AFTER translator IDs are known
+  const { componentsNeedingT: factoryComponentsNeedingT, rewrote: didRewriteRefs } = rewriteModuleFactoryReferences(
+    ast,
+    moduleFactoryImportedNames,
+    componentTranslatorIds,
+  );
+  // Merge factory components into the main set
+  for (const comp of factoryComponentsNeedingT) {
+    componentsNeedingT.add(comp);
+  }
+
   if (needsClientDirective && componentsNeedingT.size > 0) {
     addUseClientDirective(ast);
   }
 
+  const didModify = stringsWrapped > 0 || didWrapFactory || didRewriteRefs;
   const output = generate(ast, { retainLines: false });
   return {
     code: output.code,
     stringsWrapped,
-    modified: true,
+    modified: didModify,
     usedKeys: allUsedKeys,
   };
 }
@@ -1136,7 +1478,10 @@ function injectTIntoBlock(
       // const <id> = useTranslations(...) or const <id> = getTranslations(...)
       if (isTranslationFactoryCall(d.init, useTranslationsLocal)) {
         return {
-          namespaced: updateCallNamespace(d.init as t.CallExpression, namespace),
+          namespaced: updateCallNamespace(
+            d.init as t.CallExpression,
+            namespace,
+          ),
           translatorId: d.id.name,
         };
       }
@@ -1199,7 +1544,10 @@ function injectAsyncTIntoBlock(
       // const <id> = getTranslations(...)
       if (isGetTranslationsCall(d.init, getTranslationsLocal)) {
         return {
-          namespaced: updateCallNamespace(d.init as t.CallExpression, namespace),
+          namespaced: updateCallNamespace(
+            d.init as t.CallExpression,
+            namespace,
+          ),
           translatorId: d.id.name,
         };
       }
@@ -1506,9 +1854,7 @@ function addUseClientDirective(ast: File): void {
   if (!ast.program.directives) {
     ast.program.directives = [];
   }
-  ast.program.directives.unshift(
-    t.directive(t.directiveLiteral("use client")),
-  );
+  ast.program.directives.unshift(t.directive(t.directiveLiteral("use client")));
 }
 
 function transformInline(
@@ -1722,9 +2068,83 @@ function transformInline(
 
     ObjectProperty(path: NodePath<t.ObjectProperty>) {
       if (isInsideClass(path)) return;
-      if (!isInsideFunction(path)) return;
 
-      const ownerFn = getNearestFunctionPath(path as unknown as NodePath<t.Node>);
+      const factoryConstNames = options.moduleFactoryConstNames ?? [];
+      const inFunction = isInsideFunction(path);
+
+      if (!inFunction) {
+        // Module-factory path for inline mode
+        const constName = getTopLevelConstName(path as unknown as NodePath<t.Node>);
+        if (!constName || !factoryConstNames.includes(constName)) return;
+
+        const keyNode = path.node.key;
+        if (keyNode.type !== "Identifier" && keyNode.type !== "StringLiteral")
+          return;
+        const propName =
+          keyNode.type === "Identifier" ? keyNode.name : keyNode.value;
+        if (!isContentProperty(propName)) return;
+
+        const valueNode = path.node.value;
+
+        if (valueNode.type === "ConditionalExpression") {
+          const result = transformConditionalBranchInline(valueNode, textToKey);
+          if (result.count > 0) {
+            path.node.value = result.node;
+            stringsWrapped += result.count;
+          }
+          return;
+        }
+
+        let text: string | undefined;
+        let templateInfo:
+          | {
+              placeholders: string[];
+              expressions: t.TemplateLiteral["expressions"];
+            }
+          | undefined;
+
+        if (valueNode.type === "StringLiteral") {
+          text = valueNode.value;
+        } else if (valueNode.type === "TemplateLiteral") {
+          const info = buildTemplateLiteralText(
+            valueNode.quasis,
+            valueNode.expressions,
+          );
+          if (info) {
+            text = info.text;
+            templateInfo = {
+              placeholders: info.placeholders,
+              expressions: valueNode.expressions,
+            };
+          }
+        }
+
+        if (!text || !(text in textToKey)) return;
+
+        const key = textToKey[text];
+        const args: t.Expression[] = [
+          t.stringLiteral(text),
+          t.stringLiteral(key),
+        ];
+        if (templateInfo && templateInfo.placeholders.length > 0) {
+          args.push(
+            buildValuesObject(
+              templateInfo.expressions,
+              templateInfo.placeholders,
+            ),
+          );
+        }
+        path.node.value = markGeneratedCall(
+          t.callExpression(t.identifier("t"), args),
+        );
+        stringsWrapped++;
+        return;
+      }
+
+      // Existing function-scoped logic
+      const ownerFn = getNearestFunctionPath(
+        path as unknown as NodePath<t.Node>,
+      );
       if (!ownerFn) return;
       if (!functionContainsJSX(ownerFn.node)) return;
       const compName = getComponentName(ownerFn as unknown as NodePath<t.Node>);
@@ -1797,7 +2217,11 @@ function transformInline(
     },
   });
 
-  if (stringsWrapped === 0 && !repaired && !boundaryRepaired) {
+  const hasModuleFactoryWorkInline =
+    (options.moduleFactoryConstNames?.length ?? 0) > 0 ||
+    (options.moduleFactoryImportedNames?.length ?? 0) > 0;
+
+  if (stringsWrapped === 0 && !repaired && !boundaryRepaired && !hasModuleFactoryWorkInline) {
     return {
       code: generate(ast).code,
       stringsWrapped: 0,
@@ -1806,7 +2230,7 @@ function transformInline(
     };
   }
 
-  if (stringsWrapped === 0 && (repaired || boundaryRepaired)) {
+  if (stringsWrapped === 0 && !hasModuleFactoryWorkInline && (repaired || boundaryRepaired)) {
     if (needsClientDirective && boundaryRepaired) {
       addUseClientDirective(ast);
     }
@@ -1817,6 +2241,13 @@ function transformInline(
       modified: true,
       usedKeys: [],
     };
+  }
+
+  // Pre-scan: discover which components will need hook due to factory imports
+  const moduleFactoryImportedNamesInline = options.moduleFactoryImportedNames ?? [];
+  const factoryRefComponentsInline = preDiscoverFactoryRefComponents(ast, moduleFactoryImportedNamesInline);
+  for (const comp of factoryRefComponentsInline) {
+    componentsNeedingT.add(comp);
   }
 
   const needsHook = componentsNeedingT.size > 0;
@@ -1890,6 +2321,7 @@ function transformInline(
       ? t.callExpression(t.identifier(hookLocalName), [])
       : t.callExpression(t.identifier(hookLocalName), []);
 
+    const serverAwait = !isClient;
     traverse(ast, {
       FunctionDeclaration(path: NodePath<t.FunctionDeclaration>) {
         const name = getComponentName(path as unknown as NodePath<t.Node>);
@@ -1901,6 +2333,7 @@ function transformInline(
           hookCall,
           name,
           path.node,
+          serverAwait,
         );
         componentTranslatorIds.set(name, translatorId);
       },
@@ -1922,6 +2355,7 @@ function transformInline(
             hookCall,
             name,
             init,
+            serverAwait,
           );
           componentTranslatorIds.set(name, translatorId);
           return;
@@ -1936,6 +2370,7 @@ function transformInline(
             hookCall,
             name,
             wrappedFn,
+            serverAwait,
           );
           componentTranslatorIds.set(name, translatorId);
         }
@@ -1951,6 +2386,7 @@ function transformInline(
             hookCall,
             name,
             decl,
+            serverAwait,
           );
           componentTranslatorIds.set(name, translatorId);
           return;
@@ -1966,6 +2402,7 @@ function transformInline(
             hookCall,
             name,
             decl,
+            serverAwait,
           );
           componentTranslatorIds.set(name, translatorId);
           return;
@@ -1980,6 +2417,7 @@ function transformInline(
             hookCall,
             name,
             wrappedFn,
+            serverAwait,
           );
           componentTranslatorIds.set(name, translatorId);
         }
@@ -1988,14 +2426,30 @@ function transformInline(
     });
   }
 
+  // Module factory: wrap const declarations as arrow factories
+  const moduleFactoryConstNames = options.moduleFactoryConstNames ?? [];
+  const didWrapFactoryInline = wrapModuleFactoryDeclarations(ast, moduleFactoryConstNames);
+
   rewriteGeneratedCallsForTranslator(ast, componentTranslatorIds);
+
+  // Module factory: rewrite references to imported factory consts
+  const moduleFactoryImportedNames = options.moduleFactoryImportedNames ?? [];
+  const { componentsNeedingT: factoryComponentsNeedingT, rewrote: didRewriteRefsInline } = rewriteModuleFactoryReferences(
+    ast,
+    moduleFactoryImportedNames,
+    componentTranslatorIds,
+  );
+  for (const comp of factoryComponentsNeedingT) {
+    componentsNeedingT.add(comp);
+  }
 
   if (needsClientDirective && (needsHook || boundaryRepaired)) {
     addUseClientDirective(ast);
   }
 
+  const didModifyInline = stringsWrapped > 0 || repaired || boundaryRepaired || didWrapFactoryInline || didRewriteRefsInline;
   const output = generate(ast, { retainLines: false });
-  return { code: output.code, stringsWrapped, modified: true, usedKeys: [] };
+  return { code: output.code, stringsWrapped, modified: didModifyInline, usedKeys: [] };
 }
 
 function injectInlineHookIntoBlock(
@@ -2003,6 +2457,7 @@ function injectInlineHookIntoBlock(
   hookCall: t.CallExpression,
   componentName?: string,
   ownerFn?: t.Function,
+  useAwait?: boolean,
 ): string {
   const targetName =
     hookCall.callee.type === "Identifier" ? hookCall.callee.name : undefined;
@@ -2013,17 +2468,34 @@ function injectInlineHookIntoBlock(
     for (const d of stmt.declarations) {
       if (d.id.type !== "Identifier") continue;
 
+      // Detect both `createT()` and `await createT()`
+      const callExpr =
+        d.init?.type === "AwaitExpression" &&
+        d.init.argument.type === "CallExpression"
+          ? d.init.argument
+          : d.init?.type === "CallExpression"
+            ? d.init
+            : null;
+
       if (
-        d.init?.type === "CallExpression" &&
-        d.init.callee.type === "Identifier" &&
-        (d.init.callee.name === "useT" ||
-          d.init.callee.name === "createT" ||
-          (targetName ? d.init.callee.name === targetName : false))
+        callExpr &&
+        callExpr.callee.type === "Identifier" &&
+        (callExpr.callee.name === "useT" ||
+          callExpr.callee.name === "createT" ||
+          (targetName ? callExpr.callee.name === targetName : false))
       ) {
         const translatorId = d.id.name;
         // Fix the hook name if it doesn't match the expected one (boundary repair)
-        if (targetName && d.init.callee.name !== targetName) {
-          d.init.callee = t.identifier(targetName);
+        if (targetName && callExpr.callee.name !== targetName) {
+          callExpr.callee = t.identifier(targetName);
+        }
+        // Upgrade sync createT() to await createT() for server components
+        if (useAwait && d.init?.type !== "AwaitExpression") {
+          d.init = t.awaitExpression(d.init!);
+          if (ownerFn && !ownerFn.async) {
+            ownerFn.async = true;
+            ownerFn.returnType = null;
+          }
         }
         return translatorId;
       }
@@ -2041,13 +2513,18 @@ function injectInlineHookIntoBlock(
     );
   }
 
+  const initExpr = useAwait
+    ? t.awaitExpression(t.cloneNode(hookCall, true))
+    : t.cloneNode(hookCall, true);
+
   const tDecl = t.variableDeclaration("const", [
-    t.variableDeclarator(
-      t.identifier(translatorId),
-      t.cloneNode(hookCall, true),
-    ),
+    t.variableDeclarator(t.identifier(translatorId), initExpr),
   ]);
 
   block.body.unshift(tDecl);
+  if (useAwait && ownerFn && !ownerFn.async) {
+    ownerFn.async = true;
+    ownerFn.returnType = null;
+  }
   return translatorId;
 }

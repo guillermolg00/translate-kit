@@ -4,7 +4,11 @@ import { scan } from "./scanner/index.js";
 import { generateSemanticKeys } from "./scanner/key-ai.js";
 import { codegen, type CodegenResult } from "./codegen/index.js";
 import { translateAll } from "./translate.js";
-import { writeTranslation, writeTranslationSplit, writeLockFile } from "./writer.js";
+import {
+  writeTranslation,
+  writeTranslationSplit,
+  writeLockFile,
+} from "./writer.js";
 import { loadJsonFile, loadLockFile, computeDiff } from "./diff.js";
 import { flatten, unflatten } from "./flatten.js";
 import { logWarning } from "./logger.js";
@@ -172,7 +176,11 @@ export async function runScanStep(
       await writeFile(sourceFile, content, "utf-8");
     }
     if (config.typeSafe) {
-      await generateNextIntlTypes(config.messagesDir, config.sourceLocale, config.splitByNamespace);
+      await generateNextIntlTypes(
+        config.messagesDir,
+        config.sourceLocale,
+        config.splitByNamespace,
+      );
     }
   }
 
@@ -190,6 +198,7 @@ export interface CodegenStepInput {
   config: TranslateKitConfig;
   cwd: string;
   textToKey?: Record<string, string>;
+  moduleFactory?: boolean;
   callbacks?: {
     onProgress?: (completed: number, total: number) => void;
   };
@@ -219,6 +228,7 @@ export async function runCodegenStep(
       i18nImport: config.scan!.i18nImport,
       mode,
       componentPath: config.inline?.componentPath,
+      moduleFactory: input.moduleFactory,
       onProgress: callbacks?.onProgress,
     },
     cwd,

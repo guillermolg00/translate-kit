@@ -45,7 +45,9 @@ export async function writeTranslationSplit(
   }
 
   // Remove stale namespace files
-  const currentFiles = new Set([...byNamespace.keys()].map((ns) => `${ns}.json`));
+  const currentFiles = new Set(
+    [...byNamespace.keys()].map((ns) => `${ns}.json`),
+  );
   let existing: string[];
   try {
     existing = await readdir(dir);

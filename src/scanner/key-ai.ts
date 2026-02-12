@@ -78,6 +78,7 @@ function buildPrompt(
       if (str.componentName) parts.push(`component: ${str.componentName}`);
       if (str.parentTag) parts.push(`tag: ${str.parentTag}`);
       if (str.propName) parts.push(`prop: ${str.propName}`);
+      if (str.parentConstName) parts.push(`const: ${str.parentConstName}`);
       if (str.sectionHeading) parts.push(`section: "${str.sectionHeading}"`);
       if (str.siblingTexts?.length) {
         parts.push(

@@ -233,7 +233,7 @@ describe("extractor", () => {
       expect(prop?.propName).toBe("title");
     });
 
-    it("does not set moduleLevel for function-level properties", () => {
+    it("does not set parentConstName for function-level properties", () => {
       const code = `function App() {
         const item = { title: "Hello World" };
         return <div />;
@@ -242,7 +242,7 @@ describe("extractor", () => {
       const strings = extractStrings(ast, "test.tsx");
 
       const prop = strings.find((s) => s.type === "object-property");
-      expect(prop?.moduleLevel).toBeUndefined();
+      expect(prop?.parentConstName).toBeUndefined();
     });
   });
 
@@ -391,7 +391,7 @@ describe("extractor", () => {
   });
 
   describe("module-level object properties", () => {
-    it("does not extract module-level object properties", () => {
+    it("extracts module-level object properties as module-object-property", () => {
       const code = `
         const DEFAULT_VIEWS = [
           { title: "My Tasks", description: "View your tasks" },
@@ -401,8 +401,12 @@ describe("extractor", () => {
       const ast = parseFile(code, "test.tsx");
       const strings = extractStrings(ast, "test.tsx");
 
-      const objProps = strings.filter((s) => s.type === "object-property");
-      expect(objProps).toHaveLength(0);
+      const moduleProps = strings.filter((s) => s.type === "module-object-property");
+      expect(moduleProps).toHaveLength(2);
+      expect(moduleProps.map((s) => s.text)).toContain("My Tasks");
+      expect(moduleProps.map((s) => s.text)).toContain("View your tasks");
+      expect(moduleProps[0].parentConstName).toBe("DEFAULT_VIEWS");
+      expect(moduleProps[1].parentConstName).toBe("DEFAULT_VIEWS");
     });
 
     it("does not extract non-content properties at module level", () => {
@@ -413,8 +417,8 @@ describe("extractor", () => {
       const ast = parseFile(code, "test.tsx");
       const strings = extractStrings(ast, "test.tsx");
 
-      const objProps = strings.filter((s) => s.type === "object-property");
-      expect(objProps).toHaveLength(0);
+      const moduleProps = strings.filter((s) => s.type === "module-object-property");
+      expect(moduleProps).toHaveLength(0);
     });
 
     it("handles mixed module and function level properties", () => {
@@ -428,9 +432,41 @@ describe("extractor", () => {
       const ast = parseFile(code, "test.tsx");
       const strings = extractStrings(ast, "test.tsx");
 
-      const objProps = strings.filter((s) => s.type === "object-property");
-      expect(objProps).toHaveLength(1);
-      expect(objProps[0].text).toBe("Function Title");
+      const funcProps = strings.filter((s) => s.type === "object-property");
+      expect(funcProps).toHaveLength(1);
+      expect(funcProps[0].text).toBe("Function Title");
+      expect(funcProps[0].parentConstName).toBeUndefined();
+
+      const moduleProps = strings.filter((s) => s.type === "module-object-property");
+      expect(moduleProps).toHaveLength(1);
+      expect(moduleProps[0].text).toBe("Module Title");
+      expect(moduleProps[0].parentConstName).toBe("DEFAULTS");
+    });
+
+    it("parentConstName is undefined for function-level properties", () => {
+      const code = `function App() {
+        const item = { title: "Hello World" };
+        return <div />;
+      }`;
+      const ast = parseFile(code, "test.tsx");
+      const strings = extractStrings(ast, "test.tsx");
+
+      const prop = strings.find((s) => s.type === "object-property");
+      expect(prop?.parentConstName).toBeUndefined();
+    });
+
+    it("extracts exported module-level properties", () => {
+      const code = `
+        export const footerLinks = [
+          { title: "About", description: "Learn about us" },
+        ];
+      `;
+      const ast = parseFile(code, "test.tsx");
+      const strings = extractStrings(ast, "test.tsx");
+
+      const moduleProps = strings.filter((s) => s.type === "module-object-property");
+      expect(moduleProps).toHaveLength(2);
+      expect(moduleProps[0].parentConstName).toBe("footerLinks");
     });
   });
 });

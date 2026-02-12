@@ -306,6 +306,11 @@ const codegenCommand = defineCommand({
       description: "Show what would be changed without modifying files",
       default: false,
     },
+    "module-factory": {
+      type: "boolean",
+      description: "Convert module-level constants with translatable strings into factory functions",
+      default: false,
+    },
   },
   async run({ args }) {
     const config = await loadTranslateKitConfig();
@@ -351,6 +356,7 @@ const codegenCommand = defineCommand({
     const result = await runCodegenStep({
       config,
       cwd: process.cwd(),
+      moduleFactory: args["module-factory"],
       callbacks: {
         onProgress: (c, t) => logProgress(c, t, "Processing files..."),
       },
@@ -379,7 +385,11 @@ const typegenCommand = defineCommand({
       logWarning("Type generation is only available in keys mode.");
       return;
     }
-    await generateNextIntlTypes(config.messagesDir, config.sourceLocale, config.splitByNamespace);
+    await generateNextIntlTypes(
+      config.messagesDir,
+      config.sourceLocale,
+      config.splitByNamespace,
+    );
     logSuccess(`Generated ${join(config.messagesDir, "next-intl.d.ts")}`);
   },
 });
@@ -400,6 +410,11 @@ const runCommand = defineCommand({
       default: false,
       description: "Ignore translation cache",
     },
+    "module-factory": {
+      type: "boolean",
+      description: "Convert module-level constants with translatable strings into factory functions",
+      default: false,
+    },
     verbose: {
       type: "boolean",
       default: false,
@@ -410,7 +425,9 @@ const runCommand = defineCommand({
     const config = await loadTranslateKitConfig();
 
     if (!config.scan) {
-      logError("No scan configuration found. Add a 'scan' section to your config.");
+      logError(
+        "No scan configuration found. Add a 'scan' section to your config.",
+      );
       process.exit(1);
     }
 
@@ -428,9 +445,14 @@ const runCommand = defineCommand({
       },
     });
     logProgressClear();
-    logSuccess(`Scan: ${scanResult.bareStringCount} strings from ${scanResult.fileCount} files`);
+    logSuccess(
+      `Scan: ${scanResult.bareStringCount} strings from ${scanResult.fileCount} files`,
+    );
 
-    if (scanResult.bareStringCount === 0 && Object.keys(scanResult.textToKey).length === 0) {
+    if (
+      scanResult.bareStringCount === 0 &&
+      Object.keys(scanResult.textToKey).length === 0
+    ) {
       logWarning("No translatable strings found.");
       return;
     }
@@ -440,12 +462,15 @@ const runCommand = defineCommand({
       config,
       cwd: process.cwd(),
       textToKey: scanResult.textToKey,
+      moduleFactory: args["module-factory"],
       callbacks: {
         onProgress: (c, t) => logProgress(c, t, "Codegen..."),
       },
     });
     logProgressClear();
-    logSuccess(`Codegen: ${codegenResult.stringsWrapped} strings wrapped in ${codegenResult.filesModified} files`);
+    logSuccess(
+      `Codegen: ${codegenResult.stringsWrapped} strings wrapped in ${codegenResult.filesModified} files`,
+    );
 
     // --- TRANSLATE ---
     const locales = config.targetLocales;
@@ -457,7 +482,8 @@ const runCommand = defineCommand({
       locales,
       force: args.force,
       callbacks: {
-        onLocaleProgress: (locale, c, t) => logProgress(c, t, `Translating ${locale}...`),
+        onLocaleProgress: (locale, c, t) =>
+          logProgress(c, t, `Translating ${locale}...`),
         onUsage: (usage) => usageTracker.add(usage),
       },
     });
@@ -472,7 +498,10 @@ const runCommand = defineCommand({
     const usage = usageTracker.get();
     if (usage.totalTokens > 0) {
       const cost = await estimateCost(config.model, usage);
-      logUsage(formatUsage(usage), cost ? formatCost(cost.totalUSD) : undefined);
+      logUsage(
+        formatUsage(usage),
+        cost ? formatCost(cost.totalUSD) : undefined,
+      );
     }
   },
 });
@@ -519,10 +548,11 @@ const main = defineCommand({
     typegen     Generate TypeScript types for message keys
 
   Flags:
-    --dry-run   Preview without writing files
-    --force     Ignore translation cache
-    --locale    Only translate a specific locale
-    --verbose   Verbose output
+    --dry-run          Preview without writing files
+    --force            Ignore translation cache
+    --locale           Only translate a specific locale
+    --module-factory   Convert module-level constants into factory functions
+    --verbose          Verbose output
 
   Examples:
     translate-kit init              # Set up a new project

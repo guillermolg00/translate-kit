@@ -17,6 +17,7 @@ translate-kit run
 |------|-------------|
 | `--dry-run` | Preview without writing files |
 | `--force` | Ignore translation cache, re-translate everything |
+| `--module-factory` | Convert module-level constants into factory functions (experimental, see [`codegen`](/docs/commands/codegen#module-factory-experimental)) |
 | `--verbose` | Show detailed output |
 
 ## What It Does
@@ -46,6 +47,9 @@ translate-kit run --dry-run
 
 # Force re-translate everything
 translate-kit run --force
+
+# Include module-level constants
+translate-kit run --module-factory
 
 # See detailed output
 translate-kit run --verbose

@@ -16,6 +16,7 @@ translate-kit codegen
 | Flag | Description |
 |------|-------------|
 | `--dry-run` | Preview changes without writing files |
+| `--module-factory` | Convert module-level constants into factory functions (experimental) |
 
 ## Prerequisites
 
@@ -115,3 +116,58 @@ Codegen detects whether a file is a client or server component:
 - **Server**: `const t = createT()`
 
 See the [Inline Mode guide](/docs/guides/inline-mode) for full details.
+
+## Module Factory (experimental)
+
+> **Warning:** This feature is experimental and may change in future versions. Review the generated output before committing.
+
+When you have translatable strings inside module-level constants (outside of React components), codegen normally skips them because there's no `t()` function available at module scope.
+
+The `--module-factory` flag converts these constants into factory functions that receive the translator as a parameter:
+
+```ts
+// Before
+export const footerLinks = [
+  { title: "About", href: "/about" },
+  { title: "Contact", href: "/contact" },
+];
+
+// After (with --module-factory)
+export const footerLinks = t => ([
+  { title: t("footer.about"), href: "/about" },
+  { title: t("footer.contact"), href: "/contact" },
+]);
+```
+
+Files that import these constants are automatically rewritten to call them with the component's translator:
+
+```tsx
+// Before
+import { footerLinks } from "./data";
+export function Footer() {
+  return <ul>{footerLinks.map(l => <li>{l.title}</li>)}</ul>;
+}
+
+// After
+import { footerLinks } from "./data";
+export function Footer() {
+  const t = useTranslations("footer");
+  return <ul>{footerLinks(t).map(l => <li>{l.title}</li>)}</ul>;
+}
+```
+
+### Safety guards
+
+The transform is skipped when it would be unsafe:
+
+- Constants with TypeScript type annotations
+- Constants referenced outside of functions/components
+- Constants imported via namespace imports (`import * as data`)
+- Constants that are mutated (`.push()`, reassignment, etc.)
+
+### Usage
+
+```bash
+translate-kit codegen --module-factory
+translate-kit run --module-factory
+```

@@ -132,6 +132,65 @@ export function getComponentName(path: NodePath<Node>): string | undefined {
 }
 
 /**
+ * Check if a name follows PascalCase convention (starts with uppercase letter)
+ * or is the special `__default__` sentinel used for anonymous default exports.
+ * Used to distinguish React components from helper functions.
+ */
+export function isPascalCase(name: string): boolean {
+  if (name === "__default__") return true;
+  return /^[A-Z]/.test(name);
+}
+
+/**
+ * Walk up the AST to find the enclosing top-level `const` declaration name.
+ * Returns `undefined` if a function/arrow/class is encountered first (meaning
+ * the path is inside a function body, not at module scope).
+ */
+export function getTopLevelConstName(
+  path: NodePath<Node>,
+): string | undefined {
+  let current = path.parentPath;
+  while (current) {
+    // If we hit a function or class boundary before reaching a const declaration,
+    // we're not at module level.
+    if (
+      current.isFunctionDeclaration() ||
+      current.isFunctionExpression() ||
+      current.isArrowFunctionExpression() ||
+      current.isClassDeclaration() ||
+      current.isClassExpression() ||
+      current.isClassMethod() ||
+      current.isClassPrivateMethod()
+    ) {
+      return undefined;
+    }
+
+    if (current.isVariableDeclarator()) {
+      // Check that the parent VariableDeclaration is `const`
+      const declParent = current.parentPath;
+      if (
+        declParent?.isVariableDeclaration() &&
+        declParent.node.kind === "const"
+      ) {
+        // Check that the declaration is at program level or exported
+        const grandParent = declParent.parentPath;
+        if (
+          grandParent?.isProgram() ||
+          grandParent?.isExportNamedDeclaration()
+        ) {
+          const id = current.node.id;
+          if (id.type === "Identifier") return id.name;
+        }
+      }
+      return undefined;
+    }
+
+    current = current.parentPath;
+  }
+  return undefined;
+}
+
+/**
  * Walk up the AST to find the nearest parent JSX element tag name.
  */
 export function getParentTagName(path: NodePath<Node>): string | undefined {

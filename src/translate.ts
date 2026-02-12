@@ -186,7 +186,10 @@ export async function translateAll(
   );
 
   if (totalInputTokens > 0 || totalOutputTokens > 0) {
-    onUsage?.({ inputTokens: totalInputTokens, outputTokens: totalOutputTokens });
+    onUsage?.({
+      inputTokens: totalInputTokens,
+      outputTokens: totalOutputTokens,
+    });
   }
 
   return results;

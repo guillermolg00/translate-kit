@@ -66,8 +66,7 @@ export function buildValuesObject(
 ): t.ObjectExpression {
   const properties = placeholders.map((name, i) => {
     const expr = expressions[i] as Expression;
-    const isShorthand =
-      expr.type === "Identifier" && expr.name === name;
+    const isShorthand = expr.type === "Identifier" && expr.name === name;
 
     return t.objectProperty(
       t.identifier(name),

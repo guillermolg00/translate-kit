@@ -14,7 +14,9 @@ export async function generateNextIntlTypes(
     const sourceDir = join(messagesDir, sourceLocale);
     let files: string[];
     try {
-      files = (await readdir(sourceDir)).filter((f) => f.endsWith(".json")).sort();
+      files = (await readdir(sourceDir))
+        .filter((f) => f.endsWith(".json"))
+        .sort();
     } catch {
       files = [];
     }

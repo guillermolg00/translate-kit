@@ -87,7 +87,11 @@ export function logUsage(tokens: string, cost?: string): void {
   if (cost) console.log(`  ${pc.dim("Est. cost:")} ${cost}`);
 }
 
-export function logProgress(current: number, total: number, label: string): void {
+export function logProgress(
+  current: number,
+  total: number,
+  label: string,
+): void {
   if (!process.stdout.isTTY) return;
   const pct = total > 0 ? Math.round((current / total) * 100) : 0;
   process.stdout.write(

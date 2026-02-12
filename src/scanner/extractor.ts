@@ -20,6 +20,7 @@ import {
   isInsideFunction,
   getComponentName,
   getParentTagName,
+  getTopLevelConstName,
 } from "../utils/ast-helpers.js";
 import { buildTemplateLiteralText } from "../utils/template-literal.js";
 import type { ExtractedString } from "../types.js";
@@ -227,11 +228,71 @@ export function extractStrings(
     },
 
     ObjectProperty(path: NodePath<ObjectProperty>) {
-      if (!isInsideFunction(path)) return; // skip module-level, codegen can't transform these
+      const inFunction = isInsideFunction(path);
+
+      if (!inFunction) {
+        // Module-level: check if inside a top-level const declaration
+        const constName = getTopLevelConstName(path as unknown as NodePath<any>);
+        if (!constName) return;
+
+        const keyNode = path.node.key;
+        if (keyNode.type !== "Identifier" && keyNode.type !== "StringLiteral")
+          return;
+
+        const propName =
+          keyNode.type === "Identifier" ? keyNode.name : keyNode.value;
+        if (!isContentProperty(propName)) return;
+
+        const valueNode = path.node.value;
+
+        if (valueNode.type === "ConditionalExpression") {
+          const texts = collectConditionalTexts(valueNode);
+          for (const t of texts) {
+            results.push({
+              text: t,
+              type: "module-object-property",
+              file: filePath,
+              line: valueNode.loc?.start.line ?? 0,
+              column: valueNode.loc?.start.column ?? 0,
+              propName,
+              parentConstName: constName,
+            });
+          }
+          return;
+        }
+
+        let text: string | undefined;
+        if (valueNode.type === "StringLiteral") {
+          text = valueNode.value.trim();
+        } else if (valueNode.type === "TemplateLiteral") {
+          const info = buildTemplateLiteralText(
+            valueNode.quasis,
+            valueNode.expressions,
+          );
+          if (info) text = info.text;
+        }
+
+        if (!text || shouldIgnore(text)) return;
+
+        results.push({
+          text,
+          type: "module-object-property",
+          file: filePath,
+          line: valueNode.loc?.start.line ?? 0,
+          column: valueNode.loc?.start.column ?? 0,
+          propName,
+          parentConstName: constName,
+        });
+        return;
+      }
+
+      // Function-level: existing logic
       const ownerFn = getNearestFunctionPath(path as unknown as NodePath<any>);
       if (!ownerFn) return;
       if (!functionContainsJSX(ownerFn)) return;
-      const componentName = getComponentName(ownerFn as unknown as NodePath<any>);
+      const componentName = getComponentName(
+        ownerFn as unknown as NodePath<any>,
+      );
       if (!componentName) return;
 
       const keyNode = path.node.key;

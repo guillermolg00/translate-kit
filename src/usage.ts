@@ -16,7 +16,11 @@ export function createUsageTracker() {
       outputTokens += usage.outputTokens ?? 0;
     },
     get(): TokenUsage {
-      return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
+      return {
+        inputTokens,
+        outputTokens,
+        totalTokens: inputTokens + outputTokens,
+      };
     },
   };
 }
@@ -40,7 +44,11 @@ export async function estimateCost(
       providers,
     });
     if (costs.totalUSD == null) return null;
-    return { totalUSD: costs.totalUSD, inputUSD: costs.inputUSD ?? 0, outputUSD: costs.outputUSD ?? 0 };
+    return {
+      totalUSD: costs.totalUSD,
+      inputUSD: costs.inputUSD ?? 0,
+      outputUSD: costs.outputUSD ?? 0,
+    };
   } catch {
     return null;
   }
