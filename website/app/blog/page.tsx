@@ -18,7 +18,13 @@ export default function BlogIndex() {
 
 	return (
 		<main className="mx-auto max-w-3xl px-6 py-24">
-			<h1 className="text-4xl font-bold tracking-tight">Blog</h1>
+			<Link
+				href="/"
+				className="text-sm text-fd-muted-foreground transition-colors hover:text-fd-foreground"
+			>
+				&larr; Home
+			</Link>
+			<h1 className="mt-8 text-4xl font-bold tracking-tight">Blog</h1>
 			<p className="mt-3 text-fd-muted-foreground">
 				Updates and insights from the translate-kit team.
 			</p>

@@ -1,0 +1,234 @@
+---
+title: "Module Factory: The Hardest 5%"
+description: "Translating strings inside React components is solved. Translating module-level constants is not. This is how module factory works, why it's hard, and where I drew the line between safe and easy."
+date: "2025-02-13"
+author: "Guillermo Lopez"
+---
+
+In the [first post](/blog/why-translate-kit), I mentioned that translate-kit handles around 95% of a typical codebase's translatable content. The remaining 5% is the content that lives outside React components: module-level constants, config objects, navigation arrays, route definitions. Strings that the scanner finds, but the codegen can't touch — because there's no `t()` function available at module scope.
+
+This post is about the experimental `--module-factory` flag, which tries to close that gap. It's the hardest transformation translate-kit does, and the one where the tension between "safe" and "easy" is most visible.
+
+---
+
+## The problem
+
+Consider this pattern, which is extremely common in Next.js apps:
+
+```tsx
+// lib/navigation.ts
+export const navLinks = [
+  { title: "Home", href: "/" },
+  { title: "About", href: "/about" },
+  { title: "Contact", href: "/contact" },
+];
+```
+
+```tsx
+// components/Navbar.tsx
+import { navLinks } from "@/lib/navigation";
+
+export function Navbar() {
+  return (
+    <nav>
+      {navLinks.map(link => (
+        <a href={link.href}>{link.title}</a>
+      ))}
+    </nav>
+  );
+}
+```
+
+The scanner sees `"Home"`, `"About"`, and `"Contact"` as translatable strings inside `navLinks`. It generates keys for them. But the codegen can't replace them with `t("nav.home")` because `navLinks` is evaluated at module scope — there's no component, no hook, no `useTranslations()` available.
+
+In keys mode, `t()` only exists inside a React component. At module scope, it's just a variable declaration. The string is visible but unreachable.
+
+---
+
+## The strategy
+
+Module factory converts the constant into a function that receives a translator:
+
+```tsx
+// Before
+export const navLinks = [
+  { title: "Home", href: "/" },
+  { title: "About", href: "/about" },
+  { title: "Contact", href: "/contact" },
+];
+
+// After (with --module-factory)
+export const navLinks = (t: (key: string) => string) => [
+  { title: t("nav.home"), href: "/" },
+  { title: t("nav.about"), href: "/about" },
+  { title: t("nav.contact"), href: "/contact" },
+];
+```
+
+And every file that imports `navLinks` gets rewritten to call it with the local translator:
+
+```tsx
+// Before
+import { navLinks } from "@/lib/navigation";
+
+export function Navbar() {
+  return (
+    <nav>
+      {navLinks.map(link => (
+        <a href={link.href}>{link.title}</a>
+      ))}
+    </nav>
+  );
+}
+
+// After
+import { useTranslations } from "next-intl";
+import { navLinks } from "@/lib/navigation";
+
+export function Navbar() {
+  const t = useTranslations("nav");
+  return (
+    <nav>
+      {navLinks(t).map(link => (
+        <a href={link.href}>{link.title}</a>
+      ))}
+    </nav>
+  );
+}
+```
+
+The constant becomes a factory. The factory receives a translator. The component provides it. The strings are now translatable.
+
+Simple concept. The implementation is anything but.
+
+---
+
+## Why it's hard
+
+The core challenge is that this transformation changes the **shape** of an export. `navLinks` was an array; now it's a function that returns an array. Every consumer of that export must be updated, and every consumer must be safe to update.
+
+This creates a chain of constraints that the codegen has to verify before touching anything.
+
+### Constraint 1: No external importers
+
+If a file outside the scan scope imports `navLinks`, the codegen can't rewrite it. The scan scope is the set of files matching your `include` patterns — typically `src/**/*.tsx`. But maybe `navLinks` is also imported by a script in `scripts/`, or a config in `next.config.ts`, or a test file that isn't in scope.
+
+If the codegen converts `navLinks` to a factory but leaves an external consumer untouched, that consumer breaks silently: it receives a function where it expected an array.
+
+So the first step is scanning **every file in the project** — not just the ones in scope — to find imports of factory candidates. Any constant with an external importer is blocked.
+
+### Constraint 2: No mutation
+
+A factory is called on every render. If the original constant was mutated somewhere:
+
+```tsx
+navLinks.push({ title: "Blog", href: "/blog" });
+```
+
+Converting it to a factory breaks the mutation — you can't `.push()` onto a function. The codegen walks the AST looking for assignment expressions, `.push()`, `.splice()`, delete operators, and any other mutation pattern. If the binding is mutated anywhere in the file, it's blocked.
+
+### Constraint 3: No unsafe import patterns
+
+Even within scope, not every import pattern is safe to rewrite:
+
+```tsx
+// Safe: named import, can rewrite footerLinks → footerLinks(t)
+import { footerLinks } from "./data";
+
+// Unsafe: namespace import, would need data.footerLinks(t)
+// but that requires understanding every usage site
+import * as data from "./data";
+```
+
+Namespace imports make it significantly harder to trace and rewrite usage. The current implementation blocks them.
+
+### Constraint 4: Framework reserved exports
+
+Next.js reads certain exports as plain objects at build time:
+
+```tsx
+export const metadata = { title: "My App", description: "..." };
+export const viewport = { width: "device-width" };
+```
+
+Converting `metadata` to a factory would break Next.js completely. A hardcoded set of reserved export names is excluded from consideration.
+
+### Constraint 5: Usage must be inside a component
+
+Even if the import is safe and the binding is clean, the rewrite only works if the constant is used inside a React component — because that's where `t()` is available. If `navLinks` is used at the top level of the importing file (e.g., assigned to another module-level constant), there's no component context to provide the translator.
+
+The codegen verifies that every reference to the imported constant is inside a function that looks like a React component: PascalCase name, returns JSX, or uses hooks.
+
+---
+
+## The planning algorithm
+
+All these constraints are checked before any code is modified. The codegen builds a **plan** — a data structure that describes exactly which constants will be converted, which files will be affected, and which imports need rewriting.
+
+The algorithm, roughly:
+
+1. **Collect candidates.** Find all module-level `const` declarations with translatable string properties (objects, arrays, nested structures).
+
+2. **Find external importers.** Glob all files outside the include scope. Parse each one looking for imports of candidate files. If a candidate constant is imported externally, block it.
+
+3. **Check binding safety.** For each candidate, walk the AST of its source file. Look for mutations, non-component usage, or any pattern that would make conversion unsafe. Block unsafe candidates.
+
+4. **Map import edges.** Within the include scope, find which files import which candidates. Build a graph of source → importer relationships.
+
+5. **Check importer safety.** For each importer, verify the import pattern is safe (named, not namespace) and the usage is inside a React component. If an importer is unsafe, block the export it references.
+
+6. **Propagate blocks.** If all importers of a candidate are blocked, the candidate itself is useless to convert. Remove it. Clean up orphaned references.
+
+The result is a plan where every entry has been validated end-to-end: the source file is safe to transform, every importer is safe to rewrite, and no external file will break.
+
+---
+
+## The line between safe and easy
+
+This is the core tension. A more aggressive approach would:
+
+- Convert constants even if some importers are outside scope (and log a warning)
+- Handle namespace imports by doing deeper usage analysis
+- Convert constants used at module scope by hoisting the factory call somehow
+
+Each of these would increase coverage — maybe from 60% of module-level constants to 85%. But each also introduces a category of silent breakage that's hard to debug.
+
+I chose the conservative path: **if there's any doubt, skip it.** A constant that isn't converted is just a string that stays hardcoded. The app works exactly as before. The developer can convert it manually if they want. But a constant that's converted incorrectly — a factory where the consumer expects an array — is a runtime error with no obvious cause.
+
+The principle is: **the worst outcome of running translate-kit should be "it didn't translate something", never "it broke something."**
+
+This means the module factory flag won't catch everything. Complex patterns, indirect references, dynamic imports — these are all out of scope. And that's intentional. The tool should be a reliable assistant, not a risky magic wand.
+
+---
+
+## Where it stands
+
+Module factory is currently behind the `--module-factory` flag in the `codegen` command. It's not part of the default pipeline. The flag signals that you're opting into a more aggressive transformation, and the output should be reviewed.
+
+```bash
+npx translate-kit codegen --module-factory
+```
+
+In practice, it handles the most common patterns well: arrays of objects with string properties, config objects, navigation definitions, static data structures exported from utility files. These account for the majority of that "remaining 5%."
+
+The cases it skips — deeply nested re-exports, computed property names, constants shared between server and client boundaries — are real but less common. They're also the ones where automatic transformation is most likely to cause subtle issues.
+
+---
+
+## What I learned
+
+Building module factory reinforced something I already suspected: the hardest part of a codegen tool isn't the transformation itself. Replacing a string with `t("key")` in the AST is straightforward. The hard part is knowing **when it's safe to do it.** And the answer is never binary — it's a spectrum of confidence.
+
+The scanner is mostly confident: if something looks like user-facing text, it probably is. The codegen inside components is highly confident: the scope is clear, the hook injection is mechanical. But module factory operates in a grey zone where the codegen has to reason about the entire dependency graph, and any mistake propagates silently.
+
+That grey zone is where most of the engineering effort went. Not into the transformation, but into the safety checks that decide whether the transformation should happen at all.
+
+---
+
+If you want to try it:
+
+```bash
+npx translate-kit codegen --module-factory
+```
+
+Review the diff before committing. The plan is conservative, but your codebase might have patterns I haven't seen yet. If you have ideas on how to improve the safety heuristics, handle more edge cases, or push the coverage further without sacrificing reliability — I'd love to hear them. Feedback and contributions are welcome on [GitHub](https://github.com/guillermolg00/translate-kit).
