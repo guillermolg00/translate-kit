@@ -616,8 +616,9 @@ function wrapModuleFactoryDeclarations(
       if (!nameSet.has(declarator.id.name)) continue;
       if (!declarator.init) continue;
 
-      // Strip type annotation if present (type is no longer valid after wrapping as factory)
-      if ((declarator.id as any).typeAnnotation) {
+      // Move type annotation to arrow function return type (preserves type safety)
+      const typeAnnotation = (declarator.id as any).typeAnnotation;
+      if (typeAnnotation) {
         (declarator.id as any).typeAnnotation = null;
       }
 
@@ -631,16 +632,34 @@ function wrapModuleFactoryDeclarations(
         continue;
       }
 
-      // Wrap: const FOO = expr → const FOO = (t) => (expr)
+      // Wrap: const FOO = expr → const FOO = (t: any) => (expr)
       const originalInit = declarator.init;
-      declarator.init = t.arrowFunctionExpression(
-        [t.identifier("t")],
+      const tParam = t.identifier("t");
+      (tParam as any).typeAnnotation = t.tsTypeAnnotation(t.tsAnyKeyword());
+      const arrowFn = t.arrowFunctionExpression(
+        [tParam],
         t.parenthesizedExpression(originalInit),
       );
+      if (typeAnnotation) {
+        (arrowFn as any).returnType = typeAnnotation;
+      }
+      declarator.init = arrowFn;
       wrapped = true;
     }
   }
   return wrapped;
+}
+
+function isInsideFunctionParam(path: NodePath): boolean {
+  let current: NodePath | null = path;
+  while (current.parentPath) {
+    if (current.parentPath.isFunction()) {
+      const fn = current.parentPath.node as t.Function;
+      return fn.params.includes(current.node as any);
+    }
+    current = current.parentPath;
+  }
+  return false;
 }
 
 function rewriteModuleFactoryReferences(
@@ -724,6 +743,9 @@ function rewriteModuleFactoryReferences(
             bPath.parentPath.parentPath?.isExportNamedDeclaration());
         if (!isImportBinding && !isTopLevelConst) return;
       }
+
+      // Skip refs inside function parameter defaults (t is not in scope there)
+      if (isInsideFunctionParam(path)) return;
 
       // Must be inside a PascalCase function (React component)
       if (!isInsideFunction(path)) return;

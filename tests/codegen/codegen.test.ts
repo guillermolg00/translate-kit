@@ -364,7 +364,7 @@ export function Footer() {
     expect(result.filesModified).toBe(2);
 
     const dataOut = await readFile(dataFile, "utf-8");
-    expect(dataOut).toContain("t =>");
+    expect(dataOut).toContain("t: any) =>");
     expect(dataOut).toContain("t(");
 
     const compOut = await readFile(compFile, "utf-8");
@@ -454,7 +454,7 @@ export function Footer() {
     expect(result.filesModified).toBe(1);
     const content = await readFile(filePath, "utf-8");
     // Const should be wrapped as factory
-    expect(content).toContain("t =>");
+    expect(content).toContain("t: any) =>");
     // Local usage should be rewritten
     expect(content).toContain("links(t)");
   });
@@ -492,7 +492,7 @@ export function App() { return <div />; }`,
 
     // Both files should remain unchanged because the importer is unsafe
     const dataOut = await readFile(dataFile, "utf-8");
-    expect(dataOut).not.toContain("t =>");
+    expect(dataOut).not.toContain("t: any) =>");
 
     const compOut = await readFile(compFile, "utf-8");
     expect(compOut).not.toContain("links(t)");
@@ -543,7 +543,7 @@ export function Footer() {
     expect(compOut).toContain("footerLinks(t)");
   });
 
-  it("module factory: transforms typed consts (strips type annotation)", async () => {
+  it("module factory: transforms typed consts (preserves type annotation as return type)", async () => {
     const filePath = join(tempDir, "config.ts");
     await writeFile(
       filePath,
@@ -567,10 +567,9 @@ export const sidebarLinks: NavItem[] = [
     expect(result.filesModified).toBe(1);
 
     const content = await readFile(filePath, "utf-8");
-    // Should be wrapped as factory
-    expect(content).toContain("t =>");
-    // Type annotation should be stripped
-    expect(content).not.toContain("NavItem[]");
+    // Should be wrapped as factory with type annotation preserved as return type
+    expect(content).toContain("=>");
+    expect(content).toContain("): NavItem[]");
     expect(content).toContain('t("sidebar.about")');
   });
 
@@ -608,7 +607,7 @@ export function App() {
 
     // Both files should remain unchanged because the importer mutates
     const dataOut = await readFile(dataFile, "utf-8");
-    expect(dataOut).not.toContain("t =>");
+    expect(dataOut).not.toContain("t: any) =>");
   });
 
   it("module factory: external importer outside include scope blocks const", async () => {
@@ -724,7 +723,7 @@ export default function Page() {
     expect(result.filesModified).toBe(1);
     const content = await readFile(filePath, "utf-8");
     // Factory should be created
-    expect(content).toContain("t =>");
+    expect(content).toContain("t: any) =>");
     // But no next-intl import should be added (no React components)
     expect(content).not.toContain("next-intl");
     expect(content).not.toContain("useTranslations");

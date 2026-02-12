@@ -1457,7 +1457,7 @@ describe("codegen transform (module factory, keys mode)", () => {
     expect(result.modified).toBe(true);
     expect(result.code).toContain("t(");
     // Should be wrapped as arrow factory
-    expect(result.code).toContain("t =>");
+    expect(result.code).toContain("t: any) =>");
   });
 
   it("converts module-level const to factory in inline mode", () => {
@@ -1475,7 +1475,7 @@ describe("codegen transform (module factory, keys mode)", () => {
     expect(result.stringsWrapped).toBe(1);
     expect(result.modified).toBe(true);
     expect(result.code).toContain('t("About", "footer.about")');
-    expect(result.code).toContain("t =>");
+    expect(result.code).toContain("t: any) =>");
   });
 
   it("does not transform if not in moduleFactoryConstNames", () => {
@@ -1562,7 +1562,7 @@ export function Nav() {
     });
 
     // Already wrapped → no additional wrapping
-    expect(result.code).not.toContain("t => (t =>");
+    expect(result.code).not.toContain("t: any) => ((t: any) =>");
   });
 
   it("is idempotent - second run does not double-call imported references", () => {
@@ -1677,7 +1677,7 @@ export function Nav({ navItems }: { navItems: any[] }) {
     expect(result.code).not.toContain("navItems(t)");
   });
 
-  it("wraps typed const (strips type annotation)", () => {
+  it("wraps typed const (preserves type annotation as return type)", () => {
     const code = `export const footerLinks: SidebarNavItem[] = [
   { title: "About", href: "/about" },
 ];`;
@@ -1689,10 +1689,26 @@ export function Nav({ navItems }: { navItems: any[] }) {
 
     expect(result.stringsWrapped).toBe(1);
     expect(result.modified).toBe(true);
-    expect(result.code).toContain("t =>");
+    expect(result.code).toContain("=>");
     expect(result.code).toContain('t("footer.about")');
-    // Type annotation should be stripped
-    expect(result.code).not.toContain("SidebarNavItem");
+    // Type annotation should be preserved as return type
+    expect(result.code).toContain("): SidebarNavItem[]");
+  });
+
+  it("does not rewrite factory ref used in function parameter default (t not in scope)", () => {
+    const code = `"use client";
+import { useTranslations } from "next-intl";
+import { defaultSearchState } from "./data";
+export function SearchDialog({ defaultState = defaultSearchState }: Props) {
+  const t = useTranslations();
+  return <div>{defaultState.query}</div>;
+}`;
+    const ast = parseFile(code, "test.tsx");
+    const result = transform(ast, {}, {
+      moduleFactoryImportedNames: ["defaultSearchState"],
+    });
+    // Should NOT rewrite — t is not available in parameter defaults
+    expect(result.code).not.toContain("defaultSearchState(t)");
   });
 
   it("does not inject useTranslations import for data-only factory file (no components)", () => {
@@ -1710,7 +1726,7 @@ export function Nav({ navItems }: { navItems: any[] }) {
     });
 
     expect(result.modified).toBe(true);
-    expect(result.code).toContain("t =>");
+    expect(result.code).toContain("t: any) =>");
     expect(result.code).toContain('t("site.unlockPower")');
     // Should NOT have useTranslations or getTranslations import
     expect(result.code).not.toContain("useTranslations");
@@ -1729,7 +1745,7 @@ export function Nav({ navItems }: { navItems: any[] }) {
     });
 
     expect(result.modified).toBe(true);
-    expect(result.code).toContain("t =>");
+    expect(result.code).toContain("t: any) =>");
     // Should NOT have getTranslations import
     expect(result.code).not.toContain("getTranslations");
     expect(result.code).not.toContain("next-intl");

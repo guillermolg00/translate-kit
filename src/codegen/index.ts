@@ -604,6 +604,18 @@ function resolveLocalToExportedName(
   return undefined;
 }
 
+function isInsideFunctionParam(path: any): boolean {
+  let current = path;
+  while (current.parentPath) {
+    if (current.parentPath.isFunction()) {
+      const fn = current.parentPath.node;
+      return fn.params.includes(current.node);
+    }
+    current = current.parentPath;
+  }
+  return false;
+}
+
 function getBindingSafety(
   ast: File,
   bindingName: string,
@@ -664,6 +676,13 @@ function getBindingSafety(
       if (!compName || !isPascalCase(compName)) {
         unsafe = true;
         reason = `"${bindingName}" is referenced outside a React component`;
+        return;
+      }
+
+      // Check if ref is inside a function parameter default (t is not in scope there)
+      if (isInsideFunctionParam(path)) {
+        unsafe = true;
+        reason = `"${bindingName}" is referenced in a function parameter default`;
         return;
       }
 
