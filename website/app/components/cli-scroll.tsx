@@ -25,22 +25,8 @@ interface Step {
 
 const steps: Step[] = [
 	{
-		id: "install",
-		number: "01",
-		title: "Install",
-		description: "One package. That's all you need.",
-		lines: [
-			{
-				text: "bun add translate-kit @ai-sdk/openai next-intl",
-				type: "command",
-			},
-			{ text: "", type: "blank" },
-			{ text: "installed translate-kit", type: "dim" },
-		],
-	},
-	{
 		id: "configure",
-		number: "02",
+		number: "01",
 		title: "Configure",
 		description:
 			"The interactive wizard sets up everything. Pick your AI provider, mode, and languages in seconds.",
@@ -64,7 +50,7 @@ const steps: Step[] = [
 	},
 	{
 		id: "scan",
-		number: "03",
+		number: "02",
 		title: "Scan",
 		description:
 			"Finds every translatable string in your codebase. AI generates semantic keys automatically.",
@@ -82,7 +68,7 @@ const steps: Step[] = [
 	},
 	{
 		id: "transform",
-		number: "04",
+		number: "03",
 		title: "Transform",
 		description:
 			"Replaces hardcoded strings with i18n calls. Adds imports automatically. Zero manual work.",
@@ -108,7 +94,7 @@ const steps: Step[] = [
 	},
 	{
 		id: "translate",
-		number: "05",
+		number: "04",
 		title: "Translate",
 		description:
 			"AI translates only what changed. Incremental by default. Run it and forget.",

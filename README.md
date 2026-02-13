@@ -16,14 +16,11 @@ In 2026, manually writing i18n JSON files key by key is obsolete. translate-kit 
 ## Quick Start
 
 ```bash
-# Install
-npm install translate-kit @ai-sdk/openai
-
 # Interactive setup — scaffolds config, installs next-intl, runs the full pipeline
 npx translate-kit init
 ```
 
-That's it. The `init` wizard creates your config, sets up locales, and optionally scans + transforms + translates your entire codebase in one step.
+That's it. No global install needed — just run it with `npx` (or `bunx`). The `init` wizard creates your config, sets up locales, and optionally scans + transforms + translates your entire codebase in one step.
 
 > See the full [Getting Started](https://translate-kit.com/docs/getting-started) guide for detailed setup.
 
@@ -58,7 +55,7 @@ Translation happens before your app ships. No client-side SDK, no loading spinne
 Works with any [Vercel AI SDK](https://sdk.vercel.ai/) provider. You pick the model, you control the cost.
 
 ```bash
-npm install @ai-sdk/openai       # OpenAI
+npm install @ai-sdk/openai       # OpenAI (install as devDependency)
 npm install @ai-sdk/anthropic    # Anthropic
 npm install @ai-sdk/google       # Google
 npm install @ai-sdk/mistral      # Mistral

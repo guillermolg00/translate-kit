@@ -3,10 +3,9 @@
 import { useState } from "react";
 
 const packageManagers = [
-	{ name: "npm", command: "npm i -g translate-kit" },
-	{ name: "pnpm", command: "pnpm add -g translate-kit" },
-	{ name: "bun", command: "bun add -g translate-kit" },
-	{ name: "yarn", command: "yarn global add translate-kit" },
+	{ name: "npm", command: "npx translate-kit init" },
+	{ name: "pnpm", command: "pnpx translate-kit init" },
+	{ name: "bun", command: "bunx translate-kit init" },
 ];
 
 export function InstallCommand() {
