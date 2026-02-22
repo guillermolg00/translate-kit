@@ -6,6 +6,7 @@ export type {
 	LockFile,
 	ScanOptions,
 	TranslateKitConfig,
+	TranslationContextEntry,
 	TranslationOptions,
 	TranslationResult,
 } from "./types.js";

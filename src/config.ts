@@ -9,6 +9,12 @@ const configSchema = z
 			(val) => val != null && typeof val === "object",
 			{ message: "model must be an AI SDK LanguageModel instance" },
 		),
+		fallbackModel: z
+			.custom<TranslateKitConfig["fallbackModel"]>(
+				(val) => val == null || typeof val === "object",
+				{ message: "fallbackModel must be an AI SDK LanguageModel instance" },
+			)
+			.optional(),
 		mode: z.enum(["keys", "inline"]).default("keys"),
 		sourceLocale: z.string().min(1),
 		targetLocales: z.array(z.string().min(1)).min(1),
@@ -18,12 +24,15 @@ const configSchema = z
 		translation: z
 			.object({
 				batchSize: z.number().int().positive().default(50),
+				targetBatchTokens: z.number().int().positive().default(2000).optional(),
 				context: z.string().optional(),
 				glossary: z.record(z.string(), z.string()).optional(),
 				tone: z.string().optional(),
 				retries: z.number().int().min(0).default(2),
 				concurrency: z.number().int().positive().default(3),
 				validatePlaceholders: z.boolean().default(true).optional(),
+				maxCostPerRun: z.number().positive().optional(),
+				confirmAbove: z.number().positive().optional(),
 			})
 			.optional(),
 		scan: z

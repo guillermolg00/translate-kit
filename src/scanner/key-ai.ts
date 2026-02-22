@@ -6,6 +6,7 @@ import type { ExtractedString } from "../types.js";
 
 interface KeyGenInput {
 	model: LanguageModel;
+	fallbackModel?: LanguageModel;
 	strings: ExtractedString[];
 	existingMap?: Record<string, string>;
 	/** All texts found in the codebase (including wrapped). Used to determine which existingMap entries are still active. When omitted, defaults to texts from `strings`. */
@@ -88,6 +89,7 @@ function buildPrompt(
 						.join(", ")}]`,
 				);
 			}
+			if (str.compositeContext) parts.push(`composite: "${str.compositeContext}"`);
 			lines.push(`  ${parts.join(", ")}`);
 		}
 	}
@@ -142,8 +144,8 @@ function inferNamespace(str: ExtractedString): string {
 	return "common";
 }
 
-async function generateKeysBatchWithRetry(
-	model: LanguageModel,
+async function attemptKeyGeneration(
+	targetModel: LanguageModel,
 	strings: ExtractedString[],
 	retries: number,
 	existingMap?: Record<string, string>,
@@ -166,7 +168,7 @@ async function generateKeysBatchWithRetry(
 	for (let attempt = 0; attempt <= retries; attempt++) {
 		try {
 			const { object, usage } = await generateObject({
-				model,
+				model: targetModel,
 				prompt,
 				schema,
 			});
@@ -201,6 +203,24 @@ async function generateKeysBatchWithRetry(
 	}
 
 	throw lastError;
+}
+
+async function generateKeysBatchWithRetry(
+	model: LanguageModel,
+	strings: ExtractedString[],
+	retries: number,
+	existingMap?: Record<string, string>,
+	fallbackModel?: LanguageModel,
+): Promise<KeyBatchResult> {
+	try {
+		return await attemptKeyGeneration(model, strings, retries, existingMap);
+	} catch (primaryError) {
+		if (fallbackModel) {
+			logWarning("Primary model failed for key generation, falling back to secondary model...");
+			return await attemptKeyGeneration(fallbackModel, strings, retries, existingMap);
+		}
+		throw primaryError;
+	}
 }
 
 function resolveCollisions(
@@ -286,6 +306,7 @@ export async function generateSemanticKeys(
 ): Promise<Record<string, string>> {
 	const {
 		model,
+		fallbackModel,
 		strings,
 		existingMap = {},
 		allTexts,
@@ -339,6 +360,7 @@ export async function generateSemanticKeys(
 					batch,
 					retries,
 					activeExisting,
+					fallbackModel,
 				);
 				Object.assign(allNewKeys, keys);
 				totalInputTokens += usage.inputTokens;

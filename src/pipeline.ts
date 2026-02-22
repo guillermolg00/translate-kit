@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type CodegenResult, codegen } from "./codegen/index.js";
+import { type CostEstimate, estimateTranslationCost } from "./cost.js";
 import { computeDiff, loadJsonFile, loadLockFile } from "./diff.js";
 import { flatten, unflatten } from "./flatten.js";
 import { logWarning } from "./logger.js";
@@ -8,7 +9,11 @@ import { scan } from "./scanner/index.js";
 import { generateSemanticKeys } from "./scanner/key-ai.js";
 import { translateAll } from "./translate.js";
 import { generateNextIntlTypes } from "./typegen.js";
-import type { TranslateKitConfig } from "./types.js";
+import type {
+	ExtractedString,
+	TranslateKitConfig,
+	TranslationContextEntry,
+} from "./types.js";
 import {
 	writeLockFile,
 	writeTranslation,
@@ -45,6 +50,50 @@ export async function writeMapFile(
 	await mkdir(messagesDir, { recursive: true });
 	const content = `${JSON.stringify(map, null, 2)}\n`;
 	await writeFile(mapPath, content, "utf-8");
+}
+
+export async function writeContextFile(
+	messagesDir: string,
+	textToKey: Record<string, string>,
+	strings: ExtractedString[],
+): Promise<void> {
+	const contextMap: Record<string, TranslationContextEntry> = {};
+	const textIndex = new Map<string, ExtractedString>();
+	for (const str of strings) {
+		if (!textIndex.has(str.text)) {
+			textIndex.set(str.text, str);
+		}
+	}
+
+	for (const [text, key] of Object.entries(textToKey)) {
+		const str = textIndex.get(text);
+		if (!str) continue;
+		const entry: TranslationContextEntry = { type: str.type };
+		if (str.componentName) entry.componentName = str.componentName;
+		if (str.parentTag) entry.parentTag = str.parentTag;
+		if (str.routePath) entry.routePath = str.routePath;
+		if (str.sectionHeading) entry.sectionHeading = str.sectionHeading;
+		if (str.siblingTexts?.length) entry.siblingTexts = str.siblingTexts;
+		if (str.compositeContext) entry.compositeContext = str.compositeContext;
+		if (str.propName) entry.propName = str.propName;
+		contextMap[key] = entry;
+	}
+
+	const contextPath = join(messagesDir, ".translate-context.json");
+	await mkdir(messagesDir, { recursive: true });
+	await writeFile(contextPath, `${JSON.stringify(contextMap, null, 2)}\n`, "utf-8");
+}
+
+export async function loadContextFile(
+	messagesDir: string,
+): Promise<Record<string, TranslationContextEntry>> {
+	const contextPath = join(messagesDir, ".translate-context.json");
+	try {
+		const content = await readFile(contextPath, "utf-8");
+		return JSON.parse(content);
+	} catch {
+		return {};
+	}
 }
 
 export async function loadSplitMessages(
@@ -162,6 +211,7 @@ export async function runScanStep(
 
 	const textToKey = await generateSemanticKeys({
 		model: config.model,
+		fallbackModel: config.fallbackModel,
 		strings: bareStrings,
 		existingMap,
 		allTexts,
@@ -173,6 +223,7 @@ export async function runScanStep(
 	});
 
 	await writeMapFile(config.messagesDir, textToKey);
+	await writeContextFile(config.messagesDir, textToKey, result.strings);
 
 	// Keys mode: write source locale JSON
 	const sourceFlat: Record<string, string> = {};
@@ -263,6 +314,7 @@ export interface TranslateStepInput {
 	locales?: string[];
 	force?: boolean;
 	dryRun?: boolean;
+	onConfirmCost?: (estimate: CostEstimate) => Promise<boolean>;
 	callbacks?: {
 		onLocaleProgress?: (
 			locale: string,
@@ -297,6 +349,34 @@ export async function runTranslateStep(
 	let sourceFlat = input.sourceFlat;
 	if (!sourceFlat) {
 		sourceFlat = await loadSourceFlat(config);
+	}
+
+	const context = await loadContextFile(config.messagesDir);
+
+	// Pre-flight cost check (skip for dry runs)
+	if (!input.dryRun && sourceFlat && Object.keys(sourceFlat).length > 0) {
+		const maxCost = config.translation?.maxCostPerRun;
+		if (maxCost != null || input.onConfirmCost) {
+			const estimate = await estimateTranslationCost(
+				config.model,
+				sourceFlat,
+				locales.filter((l) => l !== config.sourceLocale).length,
+				config.translation,
+			);
+
+			if (maxCost != null && estimate.estimatedCostUSD != null && estimate.estimatedCostUSD > maxCost) {
+				throw new Error(
+					`Estimated cost $${estimate.estimatedCostUSD.toFixed(4)} exceeds maxCostPerRun $${maxCost.toFixed(4)}. Aborting.`,
+				);
+			}
+
+			if (input.onConfirmCost) {
+				const confirmed = await input.onConfirmCost(estimate);
+				if (!confirmed) {
+					return { localeResults: [] };
+				}
+			}
+		}
 	}
 
 	const localeResults: TranslateLocaleResult[] = [];
@@ -351,6 +431,8 @@ export async function runTranslateStep(
 					sourceLocale: config.sourceLocale,
 					targetLocale: locale,
 					options: config.translation,
+					context,
+					fallbackModel: config.fallbackModel,
 					onProgress: callbacks?.onLocaleProgress
 						? (c, t) => callbacks.onLocaleProgress!(locale, c, t)
 						: undefined,

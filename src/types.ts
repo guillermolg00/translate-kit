@@ -2,12 +2,15 @@ import type { LanguageModel } from "ai";
 
 export interface TranslationOptions {
 	batchSize?: number;
+	targetBatchTokens?: number;
 	context?: string;
 	glossary?: Record<string, string>;
 	tone?: string;
 	retries?: number;
 	concurrency?: number;
 	validatePlaceholders?: boolean;
+	maxCostPerRun?: number;
+	confirmAbove?: number;
 }
 
 export interface ScanOptions {
@@ -23,6 +26,7 @@ export interface InlineOptions {
 
 export interface TranslateKitConfig {
 	model: LanguageModel;
+	fallbackModel?: LanguageModel;
 	mode: "keys" | "inline";
 	sourceLocale: string;
 	targetLocales: string[];
@@ -66,6 +70,18 @@ export interface ExtractedString {
 	routePath?: string;
 	sectionHeading?: string;
 	parentConstName?: string;
+	compositeContext?: string;
+}
+
+export interface TranslationContextEntry {
+	componentName?: string;
+	parentTag?: string;
+	routePath?: string;
+	sectionHeading?: string;
+	siblingTexts?: string[];
+	compositeContext?: string;
+	propName?: string;
+	type: ExtractedString["type"];
 }
 
 export interface TranslationResult {

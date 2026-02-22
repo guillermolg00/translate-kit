@@ -90,6 +90,67 @@ function collectConditionalTexts(node: ConditionalExpression): string[] {
 	return texts;
 }
 
+function getTagName(element: JSXElement): string {
+	const name = element.openingElement.name;
+	if (name.type === "JSXIdentifier") return name.name;
+	if (name.type === "JSXMemberExpression") return name.property.name;
+	return "unknown";
+}
+
+function getExpressionLabel(
+	expr: JSXExpressionContainer["expression"],
+): string {
+	if (expr.type === "Identifier") return expr.name;
+	if (expr.type === "MemberExpression" && expr.property.type === "Identifier")
+		return expr.property.name;
+	return "expr";
+}
+
+function buildCompositeContext(
+	parentElement: JSXElement,
+): string | undefined {
+	let textFragmentCount = 0;
+	let nonTextCount = 0;
+
+	for (const child of parentElement.children) {
+		if (child.type === "JSXText") {
+			if (child.value.trim()) textFragmentCount++;
+		} else if (child.type === "JSXElement") {
+			nonTextCount++;
+		} else if (child.type === "JSXExpressionContainer") {
+			if (child.expression.type !== "JSXEmptyExpression") nonTextCount++;
+		} else if (child.type === "JSXFragment") {
+			nonTextCount++;
+		}
+	}
+
+	if (textFragmentCount === 0 || nonTextCount === 0) return undefined;
+
+	const parts: string[] = [];
+	let elementIndex = 1;
+
+	for (const child of parentElement.children) {
+		if (child.type === "JSXText") {
+			const trimmed = child.value.trim();
+			if (trimmed) parts.push(trimmed);
+		} else if (child.type === "JSXElement") {
+			const tag = getTagName(child);
+			parts.push(`<${tag}>{${elementIndex}}</${tag}>`);
+			elementIndex++;
+		} else if (child.type === "JSXExpressionContainer") {
+			if (child.expression.type !== "JSXEmptyExpression") {
+				const label = getExpressionLabel(child.expression);
+				parts.push(`{${label}}`);
+			}
+		} else if (child.type === "JSXFragment") {
+			parts.push(`{${elementIndex}}`);
+			elementIndex++;
+		}
+	}
+
+	return parts.join(" ");
+}
+
 export function extractStrings(
 	ast: File,
 	filePath: string,
@@ -107,6 +168,13 @@ export function extractStrings(
 
 			if (parentTag === "T") return;
 
+			let compositeContext: string | undefined;
+			if (path.parentPath?.isJSXElement()) {
+				compositeContext = buildCompositeContext(
+					path.parentPath.node as JSXElement,
+				);
+			}
+
 			results.push({
 				text,
 				type: "jsx-text",
@@ -115,6 +183,7 @@ export function extractStrings(
 				column: path.node.loc?.start.column ?? 0,
 				componentName: getComponentName(path),
 				parentTag,
+				...(compositeContext && { compositeContext }),
 			});
 		},
 

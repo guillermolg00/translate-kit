@@ -1,8 +1,10 @@
 import "dotenv/config";
 import { join } from "node:path";
+import * as p from "@clack/prompts";
 import { defineCommand, runMain } from "citty";
 import { parseTranslateFlags, validateLocale } from "./cli-utils.js";
 import { loadTranslateKitConfig } from "./config.js";
+import type { CostEstimate } from "./cost.js";
 import {
 	logDryRun,
 	logError,
@@ -62,6 +64,28 @@ function requireNonEmptySource(
 		);
 		process.exit(1);
 	}
+}
+
+function buildCostConfirmCallback(
+	config: TranslateKitConfig,
+): ((estimate: CostEstimate) => Promise<boolean>) | undefined {
+	const confirmAbove = config.translation?.confirmAbove;
+	if (confirmAbove == null) return undefined;
+
+	return async (estimate: CostEstimate) => {
+		if (estimate.estimatedCostUSD == null) return true;
+		if (estimate.estimatedCostUSD <= confirmAbove) return true;
+
+		logInfo(
+			`Estimated cost: ~$${estimate.estimatedCostUSD.toFixed(4)} (${estimate.totalTokens.toLocaleString()} tokens)`,
+		);
+
+		const confirmed = await p.confirm({
+			message: `Estimated cost $${estimate.estimatedCostUSD.toFixed(4)} exceeds $${confirmAbove.toFixed(2)} threshold. Continue?`,
+		});
+
+		return confirmed === true;
+	};
 }
 
 const translateCommand = defineCommand({
@@ -146,6 +170,7 @@ const translateCommand = defineCommand({
 			sourceFlat,
 			locales,
 			force: args.force,
+			onConfirmCost: buildCostConfirmCallback(config),
 			callbacks: {
 				onLocaleProgress: (locale, c, t) =>
 					logProgress(c, t, `Translating ${locale}...`),
@@ -480,6 +505,7 @@ const runCommand = defineCommand({
 			sourceFlat: scanResult.sourceFlat,
 			locales,
 			force: args.force,
+			onConfirmCost: buildCostConfirmCallback(config),
 			callbacks: {
 				onLocaleProgress: (locale, c, t) =>
 					logProgress(c, t, `Translating ${locale}...`),
