@@ -1,0 +1,277 @@
+---
+title: "Translation Quality: When Context Changes Everything"
+description: "How I improved translation quality by propagating rich metadata to the translator, replacing fixed batching with token-aware waves, and adding cost control and model fallback."
+date: "2026-02-22"
+author: "Guillermo Lopez"
+---
+
+The translate-kit pipeline has three stages: scan → codegen → translate. The scanner is good at extracting strings. The codegen is good at replacing them. But the translator — the part that actually produces the text your users read — was working with almost no context.
+
+This post is about six changes that fix that. The core idea is simple: the translator should know as much about a string as the scanner does.
+
+---
+
+## The problem: a context black hole
+
+The scanner collects rich metadata for every string it finds: which component it's in, what HTML tag wraps it, the route path, nearby sibling text, the prop name. All of this is used during key generation — the AI sees `"on"` with context like `component: TaskItem, tag: p, siblings: ["Assigned to", "on"]` and generates a meaningful key like `task.on`.
+
+But after key generation, all that metadata was discarded. The translator received flat key-value pairs:
+
+```
+"task.on": "on"
+```
+
+No component name. No HTML tag. No route. No hint about what "on" means in context. The AI had to guess, and for ambiguous fragments it guessed wrong. "on" as a temporal preposition ("on Monday") vs. a spatial preposition ("on the table") vs. a toggle state ("on/off") — the translator had no way to distinguish.
+
+The root cause was architectural: the pipeline serialized strings into a map file (text → key), then into source JSON (key → text), and these flat representations were the only input to translation. The rich `ExtractedString` objects — with their `componentName`, `parentTag`, `routePath`, `siblingTexts` — were garbage collected after the scan step.
+
+---
+
+## Change 1: Composite fragment context
+
+Before fixing the translation prompt, I needed to capture one more piece of context that the scanner was missing entirely: composite fragments.
+
+Consider this JSX:
+
+```tsx
+<p>Assigned to <strong>{name}</strong> on {date}</p>
+```
+
+The scanner sees three separate JSXText fragments: `"Assigned to"`, (the strong element), `"on"`, (the date expression). Each fragment is extracted independently. The word `"on"` has a `parentTag: "p"` and a `componentName`, but nothing tells you it's part of a larger sentence structure.
+
+The new `buildCompositeContext` function detects this pattern — a parent element with a mix of text fragments and non-text children (elements, expressions) — and builds a template string:
+
+```
+"Assigned to <strong>{1}</strong> on {date}"
+```
+
+Text fragments keep their text. JSXElement children get numbered placeholders (`{1}`, `{2}`). Expression containers use the variable name when available (`{date}`, `{name}`), or `{expr}` for complex expressions.
+
+The algorithm is conservative: it only activates when a parent has both text fragments and non-text children. A `<p>Hello world</p>` gets no composite context because there's no ambiguity. A `<div><span>A</span><span>B</span></div>` gets none either because the parent has no direct text children.
+
+This composite context turns out to be the single most impactful piece of metadata for translation quality. When the translator sees `"on"` with `part of: "Assigned to <strong>{1}</strong> on {date}"`, the ambiguity disappears completely.
+
+---
+
+## Change 2: Persisting metadata and enriching the translation prompt
+
+With composite context captured, the next step was making all metadata survive the scan → translate boundary.
+
+### The context file
+
+A new `.translate-context.json` file is written alongside `.translate-map.json` during the scan step. It maps each generated key to a `TranslationContextEntry`:
+
+```json
+{
+  "task.on": {
+    "type": "jsx-text",
+    "parentTag": "p",
+    "componentName": "TaskItem",
+    "compositeContext": "Assigned to <strong>{1}</strong> on {date}"
+  },
+  "hero.welcome": {
+    "type": "jsx-text",
+    "parentTag": "h1",
+    "componentName": "Hero",
+    "routePath": "/dashboard"
+  }
+}
+```
+
+The file is built by cross-referencing the text-to-key map with the original `ExtractedString[]` array. It only includes non-empty fields to keep the file compact.
+
+### The enriched prompt
+
+The translation prompt now includes context hints after each entry:
+
+```
+Strings to translate:
+  "task.on": "on"
+    ^ part of: "Assigned to <strong>{1}</strong> on {date}", HTML: <p>, component: TaskItem
+  "hero.welcome": "Welcome back"
+    ^ HTML: <h1>, component: Hero, route: /dashboard
+```
+
+The hints are prioritized by impact: `compositeContext` first (most disambiguating), then `parentTag`, `componentName`, `propName`, `routePath`. Only non-empty fields are included. A string with no context metadata gets no hint line — the prompt stays clean.
+
+This is a direct signal to the AI about how the string is used. For a word like `"on"`, the composite context eliminates guessing. For a heading like `"Welcome back"`, knowing it's an `<h1>` in a Hero component on the dashboard route helps the AI choose the right register and formality level.
+
+---
+
+## Change 3: Token-aware batching
+
+The previous batching strategy was simple: slice entries into chunks of N (default 50). This created two problems:
+
+1. **Uneven prompt sizes.** A batch of 50 short keys (`"Save"`, `"Cancel"`, `"OK"`) produces a much smaller prompt than 50 long keys with full sentences. The AI handles both, but the cost profile is very different.
+
+2. **No control over prompt budget.** With context hints now adding lines to each entry, prompts could grow unpredictably. A batch of 50 entries with rich context could exceed optimal prompt sizes.
+
+The new `chunkByTokens` function replaces fixed-size chunking. It takes two parameters:
+
+- `targetTokens` (default 2000): the estimated token budget per batch
+- `maxEntriesPerBatch` (default 50): a hard cap on entries, kept as a safety net
+
+Token estimation uses the simple `Math.ceil(text.length / 4)` heuristic — not exact, but good enough for batching decisions. The function iterates entries, accumulating estimated tokens, and cuts a batch when either limit is hit. At least one entry is always included per batch, so even a very large entry won't cause an empty batch.
+
+```typescript
+export function chunkByTokens(
+  entries: Record<string, string>,
+  options: { targetTokens: number; maxEntriesPerBatch: number },
+): Record<string, string>[]
+```
+
+The `targetBatchTokens` option is exposed in the config:
+
+```typescript
+// translate-kit.config.ts
+export default defineConfig({
+  translation: {
+    targetBatchTokens: 2000, // default
+  },
+});
+```
+
+---
+
+## Change 4: Wave-based consistency
+
+With batching solved, there was still a consistency problem. When translating 200 keys across 6 batches with concurrency 3, all batches ran in parallel. Each batch was an independent prompt with no knowledge of what the other batches translated. The AI might translate "Save" as "Guardar" in batch 1 and "Salvar" in batch 4.
+
+The fix is wave execution. Batches are grouped into waves of size `concurrency`. All batches within a wave run in parallel (for speed), but waves run sequentially (for consistency). After each wave completes, its translations become context for the next wave.
+
+```
+Wave 0: batches [0, 1, 2] — no previous context
+Wave 1: batches [3, 4, 5] — sees translations from wave 0
+```
+
+The `selectContextEntries` function chooses which previous translations to include. It prioritizes entries from the same namespace as the current batch — if you're translating `settings.*` keys, seeing how `settings.save` was translated is more useful than seeing `nav.home`. It fills up to 15 entries (configurable), padding with cross-namespace entries if needed.
+
+The prompt for wave 1+ includes a new section:
+
+```
+Previously translated (maintain consistency):
+  "common.save": "Save" → "Guardar"
+  "common.cancel": "Cancel" → "Cancelar"
+```
+
+This gives the AI explicit examples of the translation style established in previous waves. It's not a guarantee of consistency — the AI can still deviate — but in practice it significantly reduces drift between batches.
+
+The tradeoff is speed: wave execution is slightly slower than pure parallel execution because later waves wait for earlier ones. But with typical concurrency of 3 and reasonable batch sizes, the overhead is minimal. The first wave (usually the largest) still runs fully parallel.
+
+---
+
+## Change 5: Cost control
+
+As translate-kit is used on larger codebases with more target locales, the translation cost becomes non-trivial. A project with 500 keys and 10 target locales might use significant tokens. Without any guardrails, a misconfigured run could burn through API credits unexpectedly.
+
+Two new configuration options address this:
+
+### Hard limit: `maxCostPerRun`
+
+```typescript
+translation: {
+  maxCostPerRun: 5.00, // USD
+}
+```
+
+Before any translation begins, the pipeline estimates the total cost using token estimates and the model's pricing (via tokenlens). If the estimate exceeds `maxCostPerRun`, it throws an error immediately. No API calls are made.
+
+### Soft limit: `confirmAbove`
+
+```typescript
+translation: {
+  confirmAbove: 1.00, // USD
+}
+```
+
+When running interactively (via the CLI), if the estimated cost exceeds `confirmAbove`, the user sees a confirmation prompt:
+
+```
+ℹ Estimated cost: ~$2.3400 (45,200 tokens)
+◆ Estimated cost $2.34 exceeds $1.00 threshold. Continue?
+● Yes / ○ No
+```
+
+This is a soft limit — it asks, not blocks. For CI/CD or non-interactive environments, the callback simply isn't set, so the run proceeds without interruption.
+
+The cost estimation is approximate. It uses the `chars / 4` token heuristic plus ~200 tokens of prompt overhead per batch, multiplied by locale count. Output tokens are estimated as roughly equal to input entry tokens (translated text ≈ source text length). The actual cost may differ, but the estimate is conservative enough to serve as a useful guardrail.
+
+---
+
+## Change 6: Multi-model fallback
+
+API calls fail. Models have downtime. Rate limits get hit. For a pipeline that might take minutes on a large codebase, a transient failure in the final batch shouldn't require re-running everything from scratch.
+
+The new `fallbackModel` configuration provides automatic recovery:
+
+```typescript
+import { openai } from "@ai-sdk/openai";
+import { anthropic } from "@ai-sdk/anthropic";
+
+export default defineConfig({
+  model: openai("gpt-4o-mini"),
+  fallbackModel: anthropic("claude-haiku-4-5-20251001"),
+  // ...
+});
+```
+
+When the primary model fails all retries for a batch, the system automatically switches to the fallback model and retries the same batch. This applies to both translation and key generation.
+
+The implementation extracts the retry logic into `attemptTranslation` (for translation) and `attemptKeyGeneration` (for key generation), then wraps the call in a try/catch:
+
+```typescript
+try {
+  return await attemptTranslation(model, ...);
+} catch (primaryError) {
+  if (fallbackModel) {
+    logWarning("Primary model failed, falling back...");
+    return await attemptTranslation(fallbackModel, ...);
+  }
+  throw primaryError;
+}
+```
+
+The fallback model gets the full retry budget. If the primary model fails after 3 attempts, the fallback gets its own 3 attempts. This maximizes the chance of success without requiring user intervention.
+
+A few design choices worth noting:
+
+- **Same prompt, different model.** The fallback receives the exact same prompt. This means the translation quality might differ (different models have different strengths), but the output format and validation are identical.
+- **No cascading fallbacks.** It's primary → fallback, not primary → fallback1 → fallback2. Two levels is enough to handle transient failures without adding complexity.
+- **Fallback is optional.** If `fallbackModel` is not set, the behavior is unchanged — failures propagate as before.
+
+---
+
+## What changed, concretely
+
+| File | What |
+|---|---|
+| `src/types.ts` | `compositeContext`, `TranslationContextEntry`, `targetBatchTokens`, `maxCostPerRun`, `confirmAbove`, `fallbackModel` |
+| `src/scanner/extractor.ts` | `buildCompositeContext()` + helpers for JSXText handler |
+| `src/scanner/key-ai.ts` | Composite context in prompt, fallback model support |
+| `src/translate.ts` | Context in prompt, `chunkByTokens`, wave execution, `selectContextEntries`, fallback |
+| `src/pipeline.ts` | `.translate-context.json` persistence, cost pre-flight check, fallback threading |
+| `src/tokens.ts` | Token estimation functions (new) |
+| `src/cost.ts` | Cost estimation for pre-flight check (new) |
+| `src/cli.ts` | Interactive cost confirmation |
+
+---
+
+## What I learned
+
+The biggest lesson is that translation quality is not just about the model — it's about the prompt. The same model that produces mediocre translations with flat key-value pairs produces excellent translations when it knows the HTML context, the component purpose, and the sentence structure around the fragment.
+
+The composite context change alone — a relatively small addition to the scanner — had more impact on ambiguous translations than any amount of prompt engineering on the translation instructions. Telling the AI "this word appears inside this sentence structure" is worth more than telling it "please translate naturally."
+
+The wave-based consistency change reinforced something similar: giving the AI examples of its own previous translations is more effective than writing rules about consistency. Show, don't tell.
+
+Cost control and model fallback are less glamorous but equally important for production use. A tool that can run unattended — with guardrails against unexpected costs and recovery from transient failures — is qualitatively different from one that needs babysitting.
+
+---
+
+The changes are available now on v0.5.0. If you're already using translate-kit, the context enrichment and wave-based consistency are automatic — no configuration needed. Token-aware batching uses sensible defaults. Cost control and model fallback are opt-in via config.
+
+```bash
+bunx translate-kit run
+```
+
+Feedback and contributions welcome on [GitHub](https://github.com/guillermolg00/translate-kit).

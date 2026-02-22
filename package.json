@@ -1,6 +1,6 @@
 {
 	"name": "translate-kit",
-	"version": "0.4.2",
+	"version": "0.5.0",
 	"description": "AI-powered i18n pipeline for build time. Scan, transform, and translate JSX/TSX with any AI model. Zero runtime cost. Compatible with next-intl.",
 	"type": "module",
 	"license": "MIT",
