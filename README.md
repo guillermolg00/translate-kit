@@ -11,6 +11,10 @@ In 2026, manually writing i18n JSON files key by key is obsolete. translate-kit 
 
 **[Documentation](https://translate-kit.com/docs)** · **[Blog](https://translate-kit.com/blog)** · **[Getting Started](https://translate-kit.com/docs/getting-started)**
 
+<p align="center">
+  <img src="demo-init.gif" alt="translate-kit init demo" />
+</p>
+
 ---
 
 ## Quick Start
