@@ -1,6 +1,6 @@
 {
 	"name": "translate-kit",
-	"version": "0.5.0",
+	"version": "0.5.1",
 	"description": "AI-powered i18n pipeline for build time. Scan, transform, and translate JSX/TSX with any AI model. Zero runtime cost. Compatible with next-intl.",
 	"type": "module",
 	"license": "MIT",
@@ -40,7 +40,8 @@
 		}
 	},
 	"files": [
-		"dist"
+		"dist",
+		"skills"
 	],
 	"scripts": {
 		"build": "tsup",
@@ -57,7 +58,7 @@
 		"@babel/parser": "^7.29.0",
 		"@babel/traverse": "^7.29.0",
 		"@babel/types": "^7.29.0",
-		"@clack/prompts": "^1.0.0",
+		"@clack/prompts": "1.0.1",
 		"c12": "^4.0.0-beta.2",
 		"citty": "^0.2.0",
 		"dotenv": "^17.2.4",

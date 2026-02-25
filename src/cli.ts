@@ -542,6 +542,17 @@ const initCommand = defineCommand({
 	},
 });
 
+const rulesCommand = defineCommand({
+	meta: {
+		name: "rules",
+		description: "Generate AI agent rules for translate-kit workflow",
+	},
+	async run() {
+		const { runRulesCommand } = await import("./rules.js");
+		await runRulesCommand();
+	},
+});
+
 const main = defineCommand({
 	meta: {
 		name: "translate-kit",
@@ -555,6 +566,7 @@ const main = defineCommand({
 		run: runCommand,
 		typegen: typegenCommand,
 		init: initCommand,
+		rules: rulesCommand,
 	},
 	async run({ rawArgs }) {
 		if (rawArgs.length === 0) {
@@ -571,6 +583,7 @@ const main = defineCommand({
     codegen     Replace strings with t() calls
     translate   Translate messages to target locales
     typegen     Generate TypeScript types for message keys
+    rules       Generate AI agent rules for your IDE/editor
 
   Flags:
     --dry-run          Preview without writing files
