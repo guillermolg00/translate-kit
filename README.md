@@ -154,6 +154,7 @@ Source text stays visible in your code. A `<T>` component handles runtime resolu
 | `translate-kit codegen` | Replace strings with i18n calls |
 | `translate-kit translate` | Translate to target locales (incremental) |
 | `translate-kit typegen` | Generate TypeScript types for keys |
+| `translate-kit rules` | Generate AI agent rule files (Claude, Cursor, Copilot) |
 
 All commands support `--dry-run` to preview changes and `--verbose` for detailed output. `translate` and `run` support `--force` to ignore the cache.
 
@@ -182,6 +183,14 @@ translate-kit handles around 95% of translatable content in a typical codebase. 
 For these cases, add keys manually to your source locale JSON and translate-kit will translate them along with everything else.
 
 > See the [full limitations page](https://translate-kit.com/docs/technical/limitations) for details.
+
+## AI Agent Rules
+
+Teach your AI coding agent to run the translation pipeline automatically after modifying user-facing strings:
+
+```bash
+bunx skills add https://github.com/guillermolg00/translate-kit --skill translate-kit
+```
 
 ## Documentation
 

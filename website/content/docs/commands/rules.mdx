@@ -1,0 +1,41 @@
+---
+title: rules
+description: Teach your AI coding agent to run the translation pipeline automatically.
+---
+
+Teach your AI coding agent to automatically run the translation pipeline after modifying user-facing strings.
+
+## Install via Skills.sh (recommended)
+
+The fastest way to set up AI agent support:
+
+```bash
+bunx skills add https://github.com/guillermolg00/translate-kit --skill translate-kit
+```
+
+This installs a skill that teaches your AI coding agent to detect translate-kit projects and run the pipeline when you modify translatable strings.
+
+## Generate rule files
+
+For project-level rules or additional formats, use the `rules` command:
+
+```bash
+translate-kit rules
+```
+
+An interactive prompt lets you pick which formats to generate:
+
+| Format | File | Description |
+|--------|------|-------------|
+| **CLAUDE.md** | `CLAUDE.md` | Project instructions for AI agents |
+| **Cursor** | `.cursor/rules/translate-kit.mdc` | Cursor rules file |
+| **GitHub Copilot** | `.github/copilot-instructions.md` | Copilot custom instructions |
+| **Skill** | `~/.claude/skills/translate-kit/SKILL.md` | Installable agent skill |
+
+## What the rules do
+
+The generated rules instruct AI agents to:
+
+1. Detect that the project uses translate-kit (via `translate-kit.config.ts`)
+2. Run `npx translate-kit run` after adding or modifying translatable strings
+3. Avoid manually editing generated files (`.translate-map.json`, `.translate-lock.json`, locale JSON files)
